@@ -1,0 +1,40 @@
+# Build artifacts
+bin/
+gen/
+out/
+build/
+.gradle/
+.kotlin/
+
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+.shelf/
+assetWizardSettings.xml
+externalNativeBuild/
+.cxx/
+
+# Local configuration files
+local.properties
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Android Studio captures
+captures/
+
+# Secrets and sensitive data
+google-services.json
+*.keystore
+*.jks

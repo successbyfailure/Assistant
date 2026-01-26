@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clickable="true"
+    android:focusable="true">
+
+    <View
+        android:id="@+id/background_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#4D000000" />
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="12dp"
+        app:shapeAppearanceOverlay="@style/ShapeAppearance.Assistant.TopRounded"
+        app:cardBackgroundColor="?attr/colorSurface">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <View
+                android:layout_width="32dp"
+                android:layout_height="4dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="12dp"
+                android:background="?attr/colorOutlineVariant"
+                android:alpha="0.4" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingHorizontal="20dp"
+                android:paddingTop="8dp"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/status_text"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Assistant"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                    android:alpha="0.6" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_close"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:icon="@android:drawable/ic_menu_close_clear_cancel"
+                    app:iconSize="20dp"
+                    app:iconTint="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/tool_progress_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="20dp"
+                android:paddingBottom="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/tool_progress"
+                    android:layout_width="0dp"
+                    android:layout_height="4dp"
+                    android:layout_weight="1"
+                    app:indeterminateAnimationType="disjoint"
+                    app:indicatorColor="?attr/colorPrimary"
+                    android:indeterminate="true" />
+
+                <TextView
+                    android:id="@+id/tool_progress_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:text="Ejecutando tools"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:alpha="0.7" />
+            </LinearLayout>
+
+            <!-- Changed height to wrap_content to avoid collapse in wrap_content parent -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/chat_recycler"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="120dp"
+                android:paddingHorizontal="16dp"
+                android:clipToPadding="false"
+                android:layout_marginBottom="8dp" />
+
+            <com.google.android.material.divider.MaterialDivider
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:dividerColor="?attr/colorOutlineVariant"
+                android:alpha="0.2" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="8dp">
+
+                <ImageButton
+                    android:id="@+id/mic_button"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@android:drawable/ic_btn_speak_now"
+                    app:tint="?attr/colorPrimary" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    app:hintEnabled="false"
+                    app:boxBackgroundMode="none">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/input_field"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@android:color/transparent"
+                        android:hint="Chat with AI..."
+                        android:inputType="textCapSentences"
+                        android:maxLines="5"
+                        android:padding="12dp"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.floatingactionbutton.FloatingActionButton
+                    android:id="@+id/send_button"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    app:fabSize="mini"
+                    app:srcCompat="@android:drawable/ic_menu_send"
+                    app:elevation="0dp"
+                    app:tint="@android:color/white" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+</FrameLayout>

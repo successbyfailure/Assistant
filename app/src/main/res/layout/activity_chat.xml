@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="?attr/colorSurface">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        android:elevation="4dp"
+        app:titleTextColor="@android:color/white"
+        app:title="Assistant Chat" />
+
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Ready"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+        android:alpha="0.6"
+        android:background="?attr/colorSurfaceVariant" />
+
+    <LinearLayout
+        android:id="@+id/tool_progress_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="8dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="gone"
+        android:background="?attr/colorSurfaceVariant">
+
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/tool_progress"
+            android:layout_width="0dp"
+            android:layout_height="4dp"
+            android:layout_weight="1"
+            app:indeterminateAnimationType="disjoint"
+            app:indicatorColor="?attr/colorPrimary"
+            android:indeterminate="true" />
+
+        <TextView
+            android:id="@+id/tool_progress_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="Ejecutando tools"
+            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+            android:alpha="0.7" />
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/chat_recycler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:clipToPadding="false" />
+
+    <com.google.android.material.divider.MaterialDivider
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:dividerColor="?attr/colorOutlineVariant"
+        android:alpha="0.2" />
+
+    <FrameLayout
+        android:id="@+id/input_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="8dp">
+
+            <ImageButton
+                android:id="@+id/mic_button"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_btn_speak_now"
+                app:tint="?attr/colorPrimary"
+                android:contentDescription="Voice input" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                app:hintEnabled="false"
+                app:boxBackgroundMode="none">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/input_field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@android:color/transparent"
+                    android:hint="Type your message..."
+                    android:inputType="textCapSentences"
+                    android:maxLines="5"
+                    android:padding="12dp"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/send_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="4dp"
+                app:fabSize="mini"
+                app:srcCompat="@android:drawable/ic_menu_send"
+                app:elevation="0dp"
+                app:tint="@android:color/white"
+                android:contentDescription="Send message" />
+        </LinearLayout>
+    </FrameLayout>
+</LinearLayout>

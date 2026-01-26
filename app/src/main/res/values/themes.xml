@@ -1,0 +1,53 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.Assistant" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">#EADDFF</item>
+        <item name="colorOnPrimaryContainer">#21005D</item>
+
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="colorSecondaryContainer">#E8DEF8</item>
+        <item name="colorOnSecondaryContainer">#1D192B</item>
+
+        <!-- Tertiary brand color. -->
+        <item name="colorTertiary">#7D5260</item>
+        <item name="colorOnTertiary">@color/white</item>
+
+        <!-- Other attributes -->
+        <item name="colorOutline">#79747E</item>
+        <item name="colorOutlineVariant">#CAC4D0</item>
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.Assistant.Custom" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/custom_primary</item>
+        <item name="colorOnPrimary">@color/custom_on_primary</item>
+        <item name="colorPrimaryContainer">@color/custom_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/custom_on_primary_container</item>
+
+        <item name="colorSecondary">@color/custom_secondary</item>
+        <item name="colorOnSecondary">@color/custom_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/custom_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/custom_on_secondary_container</item>
+
+        <item name="colorTertiary">@color/custom_tertiary</item>
+        <item name="colorOnTertiary">@color/custom_on_tertiary</item>
+
+        <item name="colorOutline">#5E6E6E</item>
+        <item name="colorOutlineVariant">#CAD2D2</item>
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="ShapeAppearance.Assistant.TopRounded" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerSizeTopLeft">28dp</item>
+        <item name="cornerSizeTopRight">28dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+</resources>
