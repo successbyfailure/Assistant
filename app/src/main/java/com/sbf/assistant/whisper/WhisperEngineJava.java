@@ -3,18 +3,16 @@ package com.sbf.assistant.whisper;
 import android.content.Context;
 import android.util.Log;
 
+import com.sbf.assistant.llm.TfLiteHelper;
+
 import org.tensorflow.lite.DataType;
-import org.tensorflow.lite.Delegate;
 import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.Tensor;
-import org.tensorflow.lite.gpu.GpuDelegate;
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.channels.FileChannel;
 
 public class WhisperEngineJava implements WhisperEngine {
     private final String TAG = "WhisperEngineJava";
@@ -22,8 +20,8 @@ public class WhisperEngineJava implements WhisperEngine {
 
     private final Context mContext;
     private boolean mIsInitialized = false;
+    private TfLiteHelper.InterpreterResult interpreterResult = null;
     private Interpreter mInterpreter = null;
-    private Delegate gpuDelegate;
     private boolean usingGpu = false;
 
     public WhisperEngineJava(Context context) {
@@ -61,14 +59,11 @@ public class WhisperEngineJava implements WhisperEngine {
     // Unload the model by closing the interpreter
     @Override
     public void deinitialize() {
-        if (mInterpreter != null) {
-            mInterpreter.close();
-            mInterpreter = null; // Optional: Set to null to avoid accidental reuse
+        if (interpreterResult != null) {
+            interpreterResult.release();
+            interpreterResult = null;
         }
-        if (gpuDelegate != null) {
-            gpuDelegate.close();
-            gpuDelegate = null;
-        }
+        mInterpreter = null;
     }
 
     @Override
@@ -108,62 +103,10 @@ public class WhisperEngineJava implements WhisperEngine {
 
     // Load TFLite model with GPU acceleration when available
     private void loadModel(String modelPath) throws IOException {
-        ByteBuffer tfliteModel;
-        try (FileInputStream fileInputStream = new FileInputStream(modelPath);
-             FileChannel fileChannel = fileInputStream.getChannel()) {
-            long startOffset = 0;
-            long declaredLength = fileChannel.size();
-            tfliteModel = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
-        }
-
-        int numThreads = Runtime.getRuntime().availableProcessors();
-        usingGpu = false;
-
-        boolean gpuDelegateAvailable = false;
-        try {
-            Class.forName("org.tensorflow.lite.gpu.GpuDelegateFactory$Options");
-            gpuDelegateAvailable = true;
-        } catch (Throwable t) {
-            Log.w(TAG, "GPU delegate classes not available, using CPU.");
-        }
-
-        if (gpuDelegateAvailable) {
-            try {
-                Log.d(TAG, "Attempting TFLite GPU delegate...");
-                GpuDelegate gpuDelegateInstance = new GpuDelegate();
-                gpuDelegate = gpuDelegateInstance;
-
-                Interpreter.Options options = new Interpreter.Options();
-                options.setNumThreads(numThreads);
-                options.addDelegate(gpuDelegateInstance);
-
-                mInterpreter = new Interpreter(tfliteModel, options);
-                usingGpu = true;
-                Log.d(TAG, "TFLite GPU delegate enabled for Whisper");
-                return;
-            } catch (Throwable t) {
-                Log.w(TAG, "GPU delegate failed: " + t.getMessage());
-                closeDelegate();
-            }
-        }
-
-        // Fallback: CPU only with XNNPACK
-        Log.d(TAG, "Falling back to CPU with XNNPACK...");
-        Interpreter.Options cpuOptions = new Interpreter.Options();
-        cpuOptions.setNumThreads(numThreads);
-        // XNNPACK is enabled by default in recent TFLite versions
-
-        mInterpreter = new Interpreter(tfliteModel, cpuOptions);
-        Log.d(TAG, "CPU inference enabled for Whisper (threads=" + numThreads + ")");
-    }
-
-    private void closeDelegate() {
-        if (gpuDelegate != null) {
-            try {
-                gpuDelegate.close();
-            } catch (Exception ignored) {}
-            gpuDelegate = null;
-        }
+        interpreterResult = TfLiteHelper.createInterpreter(modelPath, true);
+        mInterpreter = interpreterResult.interpreter;
+        usingGpu = interpreterResult.usingGpu;
+        Log.d(TAG, "Whisper model loaded. GPU=" + usingGpu);
     }
 
     private float[] getMelSpectrogram(String wavePath) {

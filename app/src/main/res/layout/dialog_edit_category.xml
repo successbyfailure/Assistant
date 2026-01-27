@@ -38,38 +38,6 @@
             android:inputType="none" />
     </com.google.android.material.textfield.TextInputLayout>
 
-    <!-- STT Specific Options -->
-    <LinearLayout
-        android:id="@+id/layout_stt_options"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:visibility="gone"
-        android:layout_marginTop="16dp">
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/sw_use_chunking"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Enable Chunking (Pseudo-streaming)"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/til_chunk_size"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:hint="Chunk Size (ms)"
-            android:visibility="gone">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/et_chunk_size"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number"
-                android:text="3000" />
-        </com.google.android.material.textfield.TextInputLayout>
-    </LinearLayout>
-
     <com.google.android.material.divider.MaterialDivider
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

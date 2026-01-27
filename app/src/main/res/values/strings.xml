@@ -1,3 +1,112 @@
 <resources>
     <string name="app_name">Assistant</string>
+
+    <!-- Tool errors -->
+    <string name="error_missing_number">Falta campo \'number\'</string>
+    <string name="error_missing_number_or_message">Faltan campos \'number\' o \'message\'</string>
+    <string name="error_missing_hour_or_minute">Faltan campos \'hour\' o \'minute\'</string>
+    <string name="error_missing_query">Falta campo \'query\'</string>
+    <string name="error_missing_path">Falta \'path\'</string>
+    <string name="error_missing_text">Falta \'text\'</string>
+    <string name="error_missing_title_or_start">Faltan campos \'title\' o \'start\'</string>
+    <string name="error_missing_start_or_end">Faltan campos \'start\' o \'end\'</string>
+    <string name="error_invalid_path">Ruta inválida: %s</string>
+    <string name="error_invalid_start_date">Fecha \'start\' inválida.</string>
+    <string name="error_invalid_end_date">Fecha \'end\' inválida.</string>
+    <string name="error_file_not_found">Archivo no encontrado: %s</string>
+    <string name="error_directory_not_found">Directorio no encontrado: %s</string>
+    <string name="error_app_not_found">No se encontró la app solicitada.</string>
+    <string name="error_app_not_installed">App no encontrada: %s</string>
+    <string name="error_no_calendar">No hay calendario disponible.</string>
+    <string name="error_event_creation_failed">No se pudo crear el evento.</string>
+
+    <!-- Permission errors -->
+    <string name="error_permission_sms">Permiso SEND_SMS no otorgado.</string>
+    <string name="error_permission_call">Permiso CALL_PHONE no otorgado.</string>
+    <string name="error_permission_contacts">Permiso READ_CONTACTS no otorgado.</string>
+    <string name="error_permission_location">Permiso ACCESS_FINE_LOCATION no otorgado.</string>
+    <string name="error_permission_calendar_read">Permiso READ_CALENDAR no otorgado.</string>
+    <string name="error_permission_calendar_write">Permiso WRITE_CALENDAR no otorgado.</string>
+    <string name="error_permission_notifications">Habilita el acceso a notificaciones para Assistant en Ajustes.</string>
+
+    <!-- Tool success messages -->
+    <string name="tool_sms_opened">SMS abierto en la app de mensajes.</string>
+    <string name="tool_dialer_opened">Marcador abierto.</string>
+    <string name="tool_alarm_set">Intent de alarma lanzado.</string>
+    <string name="tool_app_opened">App abierta: %s</string>
+    <string name="tool_weather_opened">Abriendo clima para %s.</string>
+    <string name="tool_file_written">Archivo escrito: %s</string>
+    <string name="tool_note_saved">Nota guardada.</string>
+    <string name="tool_event_created">Evento creado: %s</string>
+
+    <!-- Tool failure messages -->
+    <string name="tool_sms_failed">No se pudo abrir la app de SMS.</string>
+    <string name="tool_dialer_failed">No se pudo abrir el marcador.</string>
+    <string name="tool_alarm_failed">No se pudo abrir la app de reloj.</string>
+    <string name="tool_app_failed">No se pudo abrir la app: %s</string>
+    <string name="tool_browser_failed">No se pudo abrir el navegador.</string>
+    <string name="tool_location_unavailable">Ubicación no disponible.</string>
+    <string name="tool_no_contacts">No se encontraron contactos.</string>
+    <string name="tool_no_events">No se encontraron eventos.</string>
+    <string name="tool_no_notifications">No hay notificaciones recientes.</string>
+    <string name="tool_no_notes">Sin notas.</string>
+    <string name="tool_unknown">Tool no reconocida: %s</string>
+    <string name="tool_execution_error">Error ejecutando %1$s: %2$s</string>
+
+    <!-- MCP errors -->
+    <string name="mcp_not_configured">MCP no configurado.</string>
+    <string name="mcp_invalid_format">Formato MCP inválido.</string>
+    <string name="mcp_server_not_found">Servidor MCP no encontrado: %s</string>
+    <string name="mcp_tool_unknown">Tool MCP desconocida: %s</string>
+    <string name="mcp_connection_failed">Fallo de conexión MCP remoto.</string>
+    <string name="mcp_error">MCP error %1$d: %2$s</string>
+
+    <!-- Model errors -->
+    <string name="model_not_found">Modelo no encontrado</string>
+    <string name="model_not_downloaded">Modelo no descargado</string>
+    <string name="model_vocab_not_found">Vocabulario no encontrado</string>
+    <string name="model_vocab_error">Error cargando vocabulario</string>
+    <string name="model_init_error">Error inicializando modelo</string>
+    <string name="model_out_of_memory">Sin memoria al cargar el modelo</string>
+    <string name="model_inference_error">Error en inferencia</string>
+    <string name="model_not_initialized">Motor no inicializado</string>
+    <string name="model_tokenizer_not_initialized">Tokenizer no inicializado</string>
+    <string name="model_service_unavailable">Servicio no disponible</string>
+    <string name="model_multimodal_incompatible">Modelo multimodal no compatible con el tokenizer local</string>
+    <string name="model_tokenizer_model_unsupported">Tokenizer .model no soportado en TFLite LLM local</string>
+
+    <!-- API errors -->
+    <string name="api_key_invalid">API Key inválida o expirada</string>
+    <string name="api_quota_exceeded">Cuota de API excedida</string>
+    <string name="api_rate_limited">Rate limit - intenta más tarde</string>
+    <string name="api_model_not_found">Modelo no encontrado en el endpoint</string>
+
+    <!-- Download errors -->
+    <string name="download_failed">Download failed: HTTP %d</string>
+    <string name="download_gated_model">Modelo gated: acepta términos y reintenta.</string>
+    <string name="download_api_key_required">API key de Hugging Face no configurada.</string>
+    <string name="download_file_not_found">Archivo no encontrado en el repositorio.</string>
+    <string name="download_no_permission">Sin permiso para descargar (API key requerida o términos no aceptados).</string>
+    <string name="download_html_response">Descarga devolvió HTML (posible gated o URL incorrecta).</string>
+    <string name="download_lfs_pointer">Descarga devolvió un puntero LFS (archivo incompleto).</string>
+
+    <!-- Gemini Nano status -->
+    <string name="gemini_unavailable">No disponible</string>
+    <string name="gemini_downloading">Descargando</string>
+    <string name="gemini_available">Disponible</string>
+    <string name="gemini_uninitialized">Sin inicializar</string>
+    <string name="gemini_error">Error: %s</string>
+
+    <!-- Whisper -->
+    <string name="whisper_not_configured">Local Whisper model not configured.</string>
+    <string name="whisper_not_installed">Local Whisper model not installed: %s</string>
+    <string name="whisper_vocab_not_installed">Whisper vocab not installed for %s</string>
+    <string name="whisper_init_failed">Whisper engine initialization failed</string>
+
+    <!-- General -->
+    <string name="audio_unavailable">Audio no disponible</string>
+    <string name="endpoint_not_found">Endpoint no encontrado</string>
+    <string name="local_whisper_unavailable">Local Whisper no disponible</string>
+    <string name="current_location">ubicación actual</string>
+    <string name="installed">Instalado</string>
 </resources>

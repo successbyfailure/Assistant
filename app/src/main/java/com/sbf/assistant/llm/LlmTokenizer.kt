@@ -6,8 +6,24 @@ import java.io.File
 import java.io.FileReader
 
 /**
- * Tokenizer for TFLite LLM models.
- * Supports SentencePiece-style vocabulary files.
+ * Basic tokenizer for TFLite LLM models.
+ * Supports SentencePiece-style vocabulary files (text format).
+ *
+ * LIMITATIONS:
+ * - This is a simplified word-level tokenizer with character fallback.
+ * - Does NOT implement proper SentencePiece BPE/Unigram algorithms.
+ * - Works best with simple prompts; complex text may tokenize poorly.
+ * - For production use, consider integrating the SentencePiece library
+ *   or using MediaPipe's built-in tokenization (.task models).
+ *
+ * SUPPORTED FORMATS:
+ * - Plain text vocab files (one token per line)
+ * - Tab/space-separated vocab files (token + score per line)
+ *
+ * NOT SUPPORTED:
+ * - Binary .model files (SentencePiece native format)
+ * - BPE merges files
+ * - HuggingFace tokenizer.json format
  */
 class LlmTokenizer {
     private val tokenToId = mutableMapOf<String, Int>()

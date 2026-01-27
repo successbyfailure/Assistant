@@ -7,10 +7,16 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.service.voice.VoiceInteractionSession
+import android.view.ContextThemeWrapper
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -25,6 +31,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import com.sbf.assistant.llm.LocalLlmService
 import com.sbf.assistant.llm.MediaPipeLlmService
@@ -42,6 +49,8 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     private lateinit var chatRecycler: RecyclerView
     private lateinit var toolProgressContainer: View
     private lateinit var toolProgressText: TextView
+    private lateinit var whisperController: WhisperController
+    private var sttMode: SttMode = SttMode.NONE
 
     private lateinit var settingsManager: SettingsManager
     private lateinit var ttsController: TtsController
@@ -81,6 +90,12 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         toolRegistry = ToolRegistry(settingsManager, mcpClient)
         toolExecutor = ToolExecutor(context, mcpClient)
         localRuntime = LocalModelRuntime(context, settingsManager)
+        whisperController = WhisperController(
+            settingsManager,
+            AudioRecorder(context),
+            LocalWhisperService(context, settingsManager, localRuntime, ModelDownloadManager(context)),
+            scope
+        )
         // Initialize local LLM services (async)
         geminiNano = GeminiNanoService(context)
         localLlm = LocalLlmService(context)
@@ -195,7 +210,20 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     }
 
     override fun onCreateContentView(): View {
-        val view = layoutInflater.inflate(R.layout.assistant_overlay, null)
+        val themedContext = ContextThemeWrapper(context, R.style.Theme_Assistant)
+        val view = LayoutInflater.from(themedContext).inflate(R.layout.assistant_overlay, null)
+        val assistantCard = view.findViewById<View>(R.id.assistant_card)
+        ViewCompat.setOnApplyWindowInsetsListener(view) { _, windowInsets ->
+            val systemBars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
+            val bottomInset = maxOf(systemBars.bottom, ime.bottom)
+            assistantCard.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = bottomInset
+            }
+            windowInsets
+        }
+        ViewCompat.requestApplyInsets(view)
+
         statusText = view.findViewById(R.id.status_text)
         inputField = view.findViewById(R.id.input_field)
         sendButton = view.findViewById(R.id.send_button)
@@ -207,7 +235,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
 
         chatAdapter = ChatAdapter(
             messages,
-            context,
+            themedContext,
             onCancelClick = { index -> cancelToolCallsFromUi(index) },
             onStatsClick = { index -> showStatsForMessage(index) },
             onThoughtToggle = { index -> toggleThought(index) }
@@ -237,23 +265,45 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         }
 
         micButton.setOnClickListener {
-            startListening()
+            if (sttMode == SttMode.AUTO) {
+                cancelWhisper()
+            } else {
+                startListening()
+            }
         }
 
         btnClose.setOnClickListener {
-            finish()
+            if (sttMode == SttMode.AUTO) {
+                cancelWhisper()
+            } else {
+                finish()
+            }
         }
         
         return view
     }
 
+    private enum class SttMode {
+        NONE,
+        AUTO
+    }
+
     private fun startListening() {
+        val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
+        if (sttConfig?.endpointId == "system" || sttConfig == null) {
+            startSystemListening()
+        } else {
+            startWhisperAuto(sttConfig)
+        }
+    }
+
+    private fun startSystemListening() {
         ttsController.stop()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
         }
-        
+
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 statusText.text = "Listening..."
@@ -287,8 +337,86 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        
+
         speechRecognizer?.startListening(intent)
+    }
+
+    private fun startWhisperAuto(config: ModelConfig) {
+        ttsController.stop()
+        statusText.text = "Cargando Whisper..."
+        scope.launch(Dispatchers.IO) {
+            if (config.endpointId == "local") {
+                val ready = whisperController.prepareLocalModel()
+                if (!ready) {
+                    withContext(Dispatchers.Main) {
+                        statusText.text = "Assistant Ready"
+                    }
+                    return@launch
+                }
+            }
+            val file = whisperController.startRecording(
+                usePcm = true,
+                autoStopOnSilence = true,
+                onSilenceDetected = {
+                    if (whisperController.isRecording() && sttMode == SttMode.AUTO) {
+                        stopWhisperAndTranscribe(config)
+                    }
+                },
+                onReadyToSpeak = { cueReadyToSpeak() }
+            )
+            withContext(Dispatchers.Main) {
+                if (file == null) {
+                    statusText.text = "Assistant Ready"
+                } else {
+                    sttMode = SttMode.AUTO
+                    statusText.text = "Escuchando (Whisper)..."
+                }
+            }
+        }
+    }
+
+    private fun stopWhisperAndTranscribe(config: ModelConfig) {
+        statusText.text = "Transcribing..."
+        sttMode = SttMode.NONE
+        whisperController.stopAndTranscribe(config) { text, error ->
+            if (text != null) {
+                val processed = applyVoiceShortcut(text)
+                if (processed != null) {
+                    inputField.setText(processed)
+                    processUserQuery(processed)
+                } else {
+                    statusText.text = "Assistant Ready"
+                }
+            } else {
+                statusText.text = "Assistant Ready"
+            }
+        }
+    }
+
+    private fun cancelWhisper() {
+        whisperController.cancelRecording()
+        sttMode = SttMode.NONE
+        statusText.text = "Assistant Ready"
+    }
+
+    private fun cueReadyToSpeak() {
+        try {
+            val vibrator = context.getSystemService(android.os.Vibrator::class.java)
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(30)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            val tone = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 70)
+            tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 80)
+        } catch (_: Exception) {
+        }
     }
 
     override fun onHandleAssist(assistState: AssistState) {
@@ -300,12 +428,15 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        startListening()
     }
 
     override fun onHide() {
         super.onHide()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         speechRecognizer?.stopListening()
+        whisperController.cancelRecording()
+        sttMode = SttMode.NONE
     }
 
     override fun onDestroy() {

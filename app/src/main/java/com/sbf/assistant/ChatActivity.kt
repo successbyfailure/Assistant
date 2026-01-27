@@ -68,6 +68,8 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var chatAdapter: ChatAdapter
     private lateinit var chatController: ChatController
     private var isRequestInFlight = false
+    private var sttMode: SttMode = SttMode.NONE
+    private var activeSttConfig: ModelConfig? = null
     private var currentAssistantMessageIndex = -1
     private var currentTokenCount = 0
     private var currentToolCount = 0
@@ -93,6 +95,7 @@ class ChatActivity : AppCompatActivity() {
 
         setSupportActionBar(toolbar)
         setupWindowInsets()
+        setupMicButtonBehavior()
 
         settingsManager = SettingsManager(this)
         ttsController = TtsController(this.applicationContext, settingsManager)
@@ -277,43 +280,149 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupMicButtonBehavior() {
+        updateMicButtonSize()
+        inputField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                updateMicButtonSize()
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+
+        micButton.setOnLongClickListener {
+            val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
+            if (sttConfig?.endpointId == "system" || sttConfig == null) return@setOnLongClickListener false
+            if (!permissionController.hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                permissionController.requestPermission(Manifest.permission.RECORD_AUDIO) { }
+                return@setOnLongClickListener true
+            }
+            if (sttMode == SttMode.NONE) {
+                startWhisperPtt(sttConfig)
+            }
+            true
+        }
+
+        micButton.setOnTouchListener { _, event ->
+            if (sttMode == SttMode.PTT) {
+                if (event.action == android.view.MotionEvent.ACTION_UP || event.action == android.view.MotionEvent.ACTION_CANCEL) {
+                    val config = activeSttConfig
+                    if (config != null) {
+                        stopWhisperAndTranscribe(config)
+                    } else {
+                        cancelWhisper()
+                    }
+                    return@setOnTouchListener true
+                }
+            }
+            false
+        }
+    }
+
+    private fun updateMicButtonSize() {
+        val empty = inputField.text.isNullOrBlank()
+        val sizeDp = if (empty) 64 else 48
+        val sizePx = (sizeDp * resources.displayMetrics.density).toInt()
+        val params = micButton.layoutParams
+        params.width = sizePx
+        params.height = sizePx
+        micButton.layoutParams = params
+    }
+
+    private enum class SttMode {
+        NONE,
+        AUTO,
+        PTT
+    }
+
     private fun toggleWhisperRecording(config: ModelConfig) {
         if (!whisperController.isRecording()) {
             stopSpeechOutput()
-            val usePcm = config.endpointId == "local"
-            if (usePcm) {
-                statusText.text = "Cargando modelo Whisper..."
-                scope.launch {
-                    val ready = whisperController.prepareLocalModel()
-                    if (!ready) {
-                        statusText.text = "Ready"
-                        Toast.makeText(this@ChatActivity, "No se pudo cargar el modelo Whisper", Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-                    val file = whisperController.startRecording(true)
-                    if (file == null) {
-                        statusText.text = "Ready"
-                        Toast.makeText(this@ChatActivity, "No se pudo iniciar la grabacion", Toast.LENGTH_SHORT).show()
-                    } else {
-                        statusText.text = "Escuchando (Whisper)..."
-                        micButton.setColorFilter(ContextCompat.getColor(this@ChatActivity, android.R.color.holo_red_light))
-                    }
-                }
-                return
-            }
-            val file = whisperController.startRecording(false)
-            if (file == null) {
-                statusText.text = "Ready"
-                Toast.makeText(this, "No se pudo iniciar la grabacion", Toast.LENGTH_SHORT).show()
-            } else {
-                statusText.text = "Recording (Whisper)..."
-                micButton.setColorFilter(ContextCompat.getColor(this, android.R.color.holo_red_light))
-            }
+            startWhisperAuto(config)
             return
         }
 
+        if (sttMode == SttMode.AUTO) {
+            cancelWhisper()
+        } else {
+            stopWhisperAndTranscribe(config)
+        }
+    }
+
+    private fun startWhisperAuto(config: ModelConfig) {
+        val onSilenceDetected = {
+            if (whisperController.isRecording() && sttMode == SttMode.AUTO) {
+                stopWhisperAndTranscribe(config)
+            }
+        }
+        statusText.text = "Cargando Whisper..."
+        scope.launch {
+            if (config.endpointId == "local") {
+                val ready = whisperController.prepareLocalModel()
+                if (!ready) {
+                    statusText.text = "Ready"
+                    Toast.makeText(this@ChatActivity, "No se pudo cargar el modelo Whisper", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+            }
+            val file = whisperController.startRecording(
+                usePcm = true,
+                autoStopOnSilence = true,
+                onSilenceDetected = onSilenceDetected,
+                onReadyToSpeak = { cueReadyToSpeak() }
+            )
+            if (file == null) {
+                statusText.text = "Ready"
+                Toast.makeText(this@ChatActivity, "No se pudo iniciar la grabacion", Toast.LENGTH_SHORT).show()
+            } else {
+                sttMode = SttMode.AUTO
+                activeSttConfig = config
+                statusText.text = "Escuchando (Whisper)..."
+                micButton.setColorFilter(ContextCompat.getColor(this@ChatActivity, android.R.color.holo_red_light))
+            }
+        }
+    }
+
+    private fun startWhisperPtt(config: ModelConfig) {
+        statusText.text = "Cargando Whisper..."
+        scope.launch {
+            if (config.endpointId == "local") {
+                val ready = whisperController.prepareLocalModel()
+                if (!ready) {
+                    statusText.text = "Ready"
+                    Toast.makeText(this@ChatActivity, "No se pudo cargar el modelo Whisper", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+            }
+            val file = whisperController.startRecording(
+                usePcm = true,
+                autoStopOnSilence = false
+            )
+            if (file == null) {
+                statusText.text = "Ready"
+                Toast.makeText(this@ChatActivity, "No se pudo iniciar la grabacion", Toast.LENGTH_SHORT).show()
+            } else {
+                sttMode = SttMode.PTT
+                activeSttConfig = config
+                statusText.text = "Escuchando (PTT)..."
+                micButton.setColorFilter(ContextCompat.getColor(this@ChatActivity, android.R.color.holo_red_light))
+            }
+        }
+    }
+
+    private fun cancelWhisper() {
+        whisperController.cancelRecording()
+        sttMode = SttMode.NONE
+        activeSttConfig = null
+        micButton.setColorFilter(null)
+        statusText.text = "Ready"
+    }
+
+    private fun stopWhisperAndTranscribe(config: ModelConfig) {
         statusText.text = "Transcribing..."
         micButton.setColorFilter(null)
+        sttMode = SttMode.NONE
+        activeSttConfig = null
         whisperController.stopAndTranscribe(config) { text, error ->
             if (text != null) {
                 val processed = applyVoiceShortcut(text)
@@ -329,6 +438,26 @@ class ChatActivity : AppCompatActivity() {
                 val message = error ?: "Whisper Error"
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun cueReadyToSpeak() {
+        try {
+            val vibrator = getSystemService(android.os.Vibrator::class.java)
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(30)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            val tone = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 70)
+            tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 80)
+        } catch (_: Exception) {
         }
     }
 

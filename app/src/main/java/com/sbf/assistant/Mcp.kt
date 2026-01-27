@@ -428,7 +428,7 @@ object McpServerFactory {
 
 class RemoteMcpServer(private val config: McpServerConfig) : McpServer {
     override val name: String = config.serverName
-    private val client = OkHttpClient()
+    private val client = HttpClientProvider.default
     private val tag = "RemoteMcpServer"
 
     override fun listTools(): List<McpTool> {

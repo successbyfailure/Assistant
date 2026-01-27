@@ -5,8 +5,6 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -15,38 +13,48 @@ import java.io.RandomAccessFile
 class AudioRecorder(private val context: Context) {
     private var mediaRecorder: MediaRecorder? = null
     private var currentFile: File? = null
-    private var isChunking = false
-    private var chunkHandler = Handler(Looper.getMainLooper())
-    private var onChunkReady: ((File) -> Unit)? = null
-    private val oldFiles = mutableListOf<File>()
     private var audioRecord: AudioRecord? = null
     private var recordThread: Thread? = null
     private var pcmBytesWritten = 0
     private var isPcmRecording = false
+    private var autoStopOnSilence = false
+    private var silenceDurationMs: Long = 0
+    private var minSpeechMs: Long = 0
+    private var silenceThreshold = 0.0f
+    private var onSilenceDetected: (() -> Unit)? = null
+    private var silenceTriggered = false
+    private var calibrateNoiseMs: Long = 0
+    private var onReadyToSpeak: (() -> Unit)? = null
 
     fun startRecording(
-        chunkDurationMs: Long = 0,
-        onChunk: ((File) -> Unit)? = null,
-        usePcm: Boolean = false
+        usePcm: Boolean = false,
+        autoStopOnSilence: Boolean = false,
+        silenceDurationMs: Long = 1200,
+        minSpeechMs: Long = 300,
+        silenceThreshold: Float = 0.02f,
+        calibrateNoiseMs: Long = 400,
+        onSilenceDetected: (() -> Unit)? = null,
+        onReadyToSpeak: (() -> Unit)? = null
     ): File? {
         try {
-            onChunkReady = onChunk
+            this.autoStopOnSilence = autoStopOnSilence
+            this.silenceDurationMs = silenceDurationMs
+            this.minSpeechMs = minSpeechMs
+            this.silenceThreshold = silenceThreshold
+            this.calibrateNoiseMs = calibrateNoiseMs
+            this.onSilenceDetected = onSilenceDetected
+            this.onReadyToSpeak = onReadyToSpeak
+            this.silenceTriggered = false
             if (usePcm) {
-                isChunking = false
                 return startPcmRecording()
             }
 
-            isChunking = chunkDurationMs > 0
             currentFile = File.createTempFile("whisper_input", ".m4a", context.cacheDir)
 
             if (!setupRecorder(currentFile!!)) {
                 return null
             }
             mediaRecorder?.start()
-
-            if (isChunking) {
-                startChunkTimer(chunkDurationMs)
-            }
 
             return currentFile
         } catch (e: Exception) {
@@ -83,47 +91,8 @@ class AudioRecorder(private val context: Context) {
         private const val TAG = "AudioRecorder"
     }
 
-    private fun startChunkTimer(duration: Long) {
-        chunkHandler.postDelayed(object : Runnable {
-            override fun run() {
-                if (mediaRecorder != null) {
-                    emitCurrentChunk()
-                    startChunkTimer(duration)
-                }
-            }
-        }, duration)
-    }
-
-    private fun emitCurrentChunk() {
-        synchronized(this) {
-            try {
-                // En MP4/AAC es complejo hacer chunks reales sin cerrar el archivo.
-                // Por ahora, para el prototipo de chunking remoto, cerraremos y reabriremos
-                // rápidamente o usaremos un formato más amigable como WAV en el futuro.
-                // Nota: El chunking en MP4 requiere reconstruir cabeceras.
-                mediaRecorder?.stop()
-                mediaRecorder?.release()
-                mediaRecorder = null
-
-                currentFile?.let {
-                    onChunkReady?.invoke(it)
-                    oldFiles.add(it)
-                }
-
-                currentFile = File.createTempFile("whisper_chunk", ".m4a", context.cacheDir)
-                if (setupRecorder(currentFile!!)) {
-                    mediaRecorder?.start()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error emitting chunk", e)
-                cleanup()
-            }
-        }
-    }
-
     fun stopRecording() {
         synchronized(this) {
-            chunkHandler.removeCallbacksAndMessages(null)
             if (isPcmRecording) {
                 stopPcmRecording()
             } else {
@@ -153,16 +122,8 @@ class AudioRecorder(private val context: Context) {
                 }
             }
             currentFile = null
-
-            oldFiles.forEach {
-                try {
-                    if (it.exists()) it.delete()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to delete old file", e)
-                }
-            }
-            oldFiles.clear()
-            onChunkReady = null
+            onSilenceDetected = null
+            onReadyToSpeak = null
         }
     }
 
@@ -206,12 +167,56 @@ class AudioRecorder(private val context: Context) {
         recorder.startRecording()
         recordThread = Thread {
             val buffer = ByteArray(bufferSize)
+            var speechDetected = false
+            var speechStartMs = 0L
+            var lastVoiceMs = 0L
+            var calibrating = autoStopOnSilence && calibrateNoiseMs > 0
+            var calibrateStartMs = 0L
+            var calibrateRmsSum = 0.0
+            var calibrateCount = 0
             FileOutputStream(currentFile!!, true).use { output ->
                 while (isPcmRecording) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
                         output.write(buffer, 0, read)
                         pcmBytesWritten += read
+                        if (autoStopOnSilence && !silenceTriggered) {
+                            val now = System.currentTimeMillis()
+                            val rms = computeRms(buffer, read)
+                            if (calibrating) {
+                                if (calibrateStartMs == 0L) {
+                                    calibrateStartMs = now
+                                }
+                                calibrateRmsSum += rms.toDouble()
+                                calibrateCount += 1
+                                if (now - calibrateStartMs >= calibrateNoiseMs) {
+                                    val avg = (calibrateRmsSum / calibrateCount.coerceAtLeast(1)).toFloat()
+                                    val adjusted = (avg * 2.5f).coerceAtLeast(silenceThreshold)
+                                    silenceThreshold = adjusted
+                                    calibrating = false
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        onReadyToSpeak?.invoke()
+                                    }
+                                }
+                                continue
+                            }
+                            if (rms >= silenceThreshold) {
+                                if (!speechDetected) {
+                                    speechDetected = true
+                                    speechStartMs = now
+                                }
+                                lastVoiceMs = now
+                            } else if (speechDetected && lastVoiceMs > 0L) {
+                                val silenceMs = now - lastVoiceMs
+                                val speechMs = now - speechStartMs
+                                if (speechMs >= minSpeechMs && silenceMs >= silenceDurationMs) {
+                                    silenceTriggered = true
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        onSilenceDetected?.invoke()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -299,5 +304,19 @@ class AudioRecorder(private val context: Context) {
             ((value shr 16) and 0xFF).toByte(),
             ((value shr 24) and 0xFF).toByte()
         )
+    }
+
+    private fun computeRms(buffer: ByteArray, length: Int): Float {
+        var sumSquares = 0.0
+        var i = 0
+        while (i + 1 < length) {
+            val sample = (buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xFF)
+            val s = sample.toShort().toInt()
+            sumSquares += (s * s).toDouble()
+            i += 2
+        }
+        val sampleCount = (length / 2).coerceAtLeast(1)
+        val rms = kotlin.math.sqrt(sumSquares / sampleCount)
+        return (rms / 32768.0).toFloat()
     }
 }

@@ -10,15 +10,11 @@ import okhttp3.sse.EventSources
 import org.json.JSONObject
 import org.json.JSONArray
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import java.io.File
 import android.util.Log
 
 class OpenAiClient(private val endpoint: Endpoint) {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)
-        .build()
+    private val client = HttpClientProvider.streaming
 
     interface StreamCallback {
         fun onToken(token: String)
@@ -124,22 +120,6 @@ class OpenAiClient(private val endpoint: Endpoint) {
                 }
             }
         })
-    }
-
-    // Nueva función para Chunking (STT Streaming simulado)
-    fun transcribeAudioStream(modelName: String, onTextUpdate: (String) -> Unit, onError: (Throwable) -> Unit): (File) -> Unit {
-        var accumulatedText = ""
-        return { file ->
-            transcribeAudio(file, modelName) { text, error ->
-                if (text != null) {
-                    accumulatedText += " $text"
-                    onTextUpdate(accumulatedText.trim())
-                    file.delete() // Limpiar fragmento
-                } else if (error != null) {
-                    onError(error)
-                }
-            }
-        }
     }
 
     fun generateSpeech(text: String, modelName: String, callback: (File?, Throwable?) -> Unit) {

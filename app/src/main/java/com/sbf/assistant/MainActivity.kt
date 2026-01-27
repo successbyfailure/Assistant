@@ -612,7 +612,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             "Gemini Nano: estado desconocido"
         }
-        val aicoreExpanded = aicoreAvailable && geminiNanoService?.isAvailable() == true
+        val aicoreExpanded = true
         addSection(
             title = "AICore / Gemini Nano (LiteRT LM)",
             models = litertModels,
@@ -1754,16 +1754,11 @@ class MainActivity : AppCompatActivity() {
         val spinnerBackupEndpoint = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_backup_endpoint)
         val spinnerBackupModel = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_backup_model)
         val tvInfo = dialogView.findViewById<TextView>(R.id.tv_category_info)
-        val layoutSttOptions = dialogView.findViewById<LinearLayout>(R.id.layout_stt_options)
-        val swUseChunking = dialogView.findViewById<MaterialSwitch>(R.id.sw_use_chunking)
-        val tilChunkSize = dialogView.findViewById<TextInputLayout>(R.id.til_chunk_size)
-        val etChunkSize = dialogView.findViewById<EditText>(R.id.et_chunk_size)
 
         // Show info about the category
         tvInfo.text = when(category) {
             Category.AGENT -> "Agent: The main brain that processes your queries. (Remote or Local)"
             Category.STT -> {
-                layoutSttOptions.visibility = View.VISIBLE
                 "STT: Speech-to-Text conversion. 'Android Default' is local/system. Whisper models are remote."
             }
             Category.TTS -> "TTS: Text-to-Speech playback. 'Android Default' is system voices."
@@ -1786,16 +1781,6 @@ class MainActivity : AppCompatActivity() {
         val endpointAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, endpointNames)
         spinnerPrimaryEndpoint.setAdapter(endpointAdapter)
         spinnerBackupEndpoint.setAdapter(endpointAdapter)
-
-        // Restore STT options if any
-        val prefs = getSharedPreferences("stt_options", Context.MODE_PRIVATE)
-        swUseChunking.isChecked = prefs.getBoolean("use_chunking", false)
-        etChunkSize.setText(prefs.getInt("chunk_size", 3000).toString())
-        if (swUseChunking.isChecked) tilChunkSize.visibility = View.VISIBLE
-
-        swUseChunking.setOnCheckedChangeListener { _, isChecked ->
-            tilChunkSize.visibility = if (isChecked) View.VISIBLE else View.GONE
-        }
 
         fun updateModelList(endpointName: String, modelSpinner: AutoCompleteTextView, currentModel: String?) {
             if (endpointName == "Android Default (System)") {
@@ -1883,14 +1868,6 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Edit ${category.name}")
             .setView(dialogView)
             .setPositiveButton("Save") { _, _ ->
-                if (category == Category.STT) {
-                    prefs.edit().apply {
-                        putBoolean("use_chunking", swUseChunking.isChecked)
-                        putInt("chunk_size", etChunkSize.text.toString().toIntOrNull() ?: 3000)
-                        apply()
-                    }
-                }
-
                 val primaryName = spinnerPrimaryEndpoint.text.toString()
                 val primaryEndpoint = if (primaryName == "Android Default (System)" || primaryName.startsWith("Local ")) {
                     null

@@ -125,6 +125,19 @@ En algunos dispositivos con Android 12 o superior, Google Assistant está muy in
    - Desactiva **"Asistente de Google"**
 2. Luego configura Assistant como predeterminado
 
+### Problema: Con pulsación larga de Power aparece “Assistant ha dejado de funcionar”
+
+**Causa:**
+En Android 16 (por ejemplo ZUI), el gesto de Power sí invoca el asistente, pero el overlay del `VoiceInteractionSession` podía crashear por falta de tema Material3.
+
+**Solución:**
+Actualiza a la versión con el fix que infla el overlay con `Theme.Assistant` (ContextThemeWrapper). Tras eso el overlay abre correctamente.
+
+### Nota sobre “Circle to Search” (gesto del círculo)
+
+En Android 16 el gesto de “círculo” dispara **Contextual Search** (Google/Lens) y **no** pasa por el canal de asistente.  
+Aunque la app sea el asistente predeterminado, ese gesto puede seguir abriendo Google y no es reemplazable por apps de terceros.
+
 ### Problema: La app no aparece en la lista de asistentes
 
 **Solución:**

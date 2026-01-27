@@ -1,10 +1,19 @@
-#include <jni.h>
-#include <string>
+/**
+ * Native library placeholder for potential future use.
+ *
+ * Possible future uses:
+ * - Custom audio processing (resampling, VAD)
+ * - Optimized tensor operations
+ * - Direct LiteRT/TFLite integration
+ *
+ * Currently this file is a stub to maintain the build configuration.
+ * The app functions fully without native code at this time.
+ */
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_sbf_assistant_MainActivity_stringFromJNI(
-        JNIEnv* env,
-        jobject /* this */) {
-    std::string hello = "Hello from C++";
-    return env->NewStringUTF(hello.c_str());
+#include <jni.h>
+
+// Placeholder function - not currently used by the app
+extern "C" JNIEXPORT jint JNICALL
+JNI_OnLoad(JavaVM* vm, void* reserved) {
+    return JNI_VERSION_1_6;
 }

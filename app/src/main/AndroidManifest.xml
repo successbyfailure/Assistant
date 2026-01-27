@@ -31,10 +31,30 @@
             android:exported="true"
             android:label="Assistant"
             android:windowSoftInputMode="adjustResize"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
             android:theme="@style/Theme.Assistant">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Voice Assistant activation via gesture/button -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEARCH_LONG_PRESS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- Attempt to receive Circle to Search / contextual search launches (likely ignored on non-priv apps). -->
+            <intent-filter>
+                <action android:name="android.app.contextualsearch.action.LAUNCH_CONTEXTUAL_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
@@ -58,7 +78,8 @@
             android:name=".AssistantVoiceInteractionService"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
-            android:exported="true">
+            android:exported="false"
+            android:process=":interactor">
             <meta-data
                 android:name="android.voice_interaction"
                 android:resource="@xml/assistant_service" />
@@ -70,7 +91,8 @@
         <service
             android:name=".AssistantSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
-            android:exported="true" />
+            android:exported="false"
+            android:process=":interactor" />
 
         <service
             android:name=".AssistantRecognitionService"

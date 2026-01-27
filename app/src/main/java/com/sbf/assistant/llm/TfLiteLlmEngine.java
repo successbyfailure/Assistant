@@ -4,16 +4,12 @@ import android.content.Context;
 import android.util.Log;
 
 import org.tensorflow.lite.DataType;
-import org.tensorflow.lite.Delegate;
 import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.Tensor;
-import org.tensorflow.lite.gpu.GpuDelegate;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.channels.FileChannel;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -25,8 +21,8 @@ public class TfLiteLlmEngine {
     private static final String TAG = "TfLiteLlmEngine";
 
     private final Context mContext;
+    private TfLiteHelper.InterpreterResult interpreterResult;
     private Interpreter mInterpreter;
-    private Delegate gpuDelegate;
     private boolean mIsInitialized = false;
     private boolean usingGpu = false;
 
@@ -83,11 +79,11 @@ public class TfLiteLlmEngine {
      * Deinitialize and release resources.
      */
     public void deinitialize() {
-        if (mInterpreter != null) {
-            mInterpreter.close();
-            mInterpreter = null;
+        if (interpreterResult != null) {
+            interpreterResult.release();
+            interpreterResult = null;
         }
-        closeDelegate();
+        mInterpreter = null;
         mIsInitialized = false;
     }
 
@@ -299,50 +295,10 @@ public class TfLiteLlmEngine {
     }
 
     private void loadModel(String modelPath) throws IOException {
-        ByteBuffer tfliteModel;
-        try (FileInputStream fileInputStream = new FileInputStream(modelPath);
-             FileChannel fileChannel = fileInputStream.getChannel()) {
-            tfliteModel = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileChannel.size());
-        }
-
-        int numThreads = Runtime.getRuntime().availableProcessors();
-        usingGpu = false;
-
-        boolean gpuDelegateAvailable = false;
-        try {
-            Class.forName("org.tensorflow.lite.gpu.GpuDelegateFactory$Options");
-            gpuDelegateAvailable = true;
-        } catch (Throwable t) {
-            Log.w(TAG, "GPU delegate classes not available, using CPU.");
-        }
-
-        if (gpuDelegateAvailable) {
-            try {
-                Log.d(TAG, "Attempting TFLite GPU delegate for LLM...");
-                GpuDelegate gpuDelegateInstance = new GpuDelegate();
-                gpuDelegate = gpuDelegateInstance;
-
-                Interpreter.Options options = new Interpreter.Options();
-                options.setNumThreads(numThreads);
-                options.addDelegate(gpuDelegateInstance);
-
-                mInterpreter = new Interpreter(tfliteModel, options);
-                usingGpu = true;
-                Log.d(TAG, "TFLite GPU delegate enabled for LLM");
-                return;
-            } catch (Throwable t) {
-                Log.w(TAG, "GPU delegate failed for LLM: " + t.getMessage());
-                closeDelegate();
-            }
-        }
-
-        // Fallback to CPU
-        Log.d(TAG, "Falling back to CPU for LLM...");
-        Interpreter.Options cpuOptions = new Interpreter.Options();
-        cpuOptions.setNumThreads(numThreads);
-
-        mInterpreter = new Interpreter(tfliteModel, cpuOptions);
-        Log.d(TAG, "CPU inference enabled for LLM (threads=" + numThreads + ")");
+        interpreterResult = TfLiteHelper.createInterpreter(modelPath, true);
+        mInterpreter = interpreterResult.interpreter;
+        usingGpu = interpreterResult.usingGpu;
+        Log.d(TAG, "LLM model loaded. GPU=" + usingGpu);
     }
 
     private void extractModelInfo() {
@@ -372,15 +328,6 @@ public class TfLiteLlmEngine {
             Log.d(TAG, "Output shape: " + arrayToString(outputShape) + ", type: " + outputType);
         } catch (Exception e) {
             Log.w(TAG, "Could not extract model info", e);
-        }
-    }
-
-    private void closeDelegate() {
-        if (gpuDelegate != null) {
-            try {
-                gpuDelegate.close();
-            } catch (Exception ignored) {}
-            gpuDelegate = null;
         }
     }
 

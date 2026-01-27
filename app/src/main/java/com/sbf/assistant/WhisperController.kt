@@ -20,10 +20,30 @@ class WhisperController(
 
     fun isRecording(): Boolean = isRecording
 
-    fun startRecording(usePcm: Boolean = false): File? {
-        currentFile = audioRecorder.startRecording(usePcm = usePcm)
+    fun startRecording(
+        usePcm: Boolean = false,
+        autoStopOnSilence: Boolean = false,
+        onSilenceDetected: (() -> Unit)? = null,
+        onReadyToSpeak: (() -> Unit)? = null
+    ): File? {
+        currentFile = audioRecorder.startRecording(
+            usePcm = usePcm,
+            autoStopOnSilence = autoStopOnSilence,
+            onSilenceDetected = onSilenceDetected,
+            onReadyToSpeak = onReadyToSpeak
+        )
         isRecording = currentFile != null
         return currentFile
+    }
+
+    fun cancelRecording() {
+        audioRecorder.stopRecording()
+        isRecording = false
+        val file = currentFile
+        currentFile = null
+        if (file != null) {
+            audioRecorder.deleteFile(file)
+        }
     }
 
     fun stopAndTranscribe(

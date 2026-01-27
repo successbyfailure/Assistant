@@ -55,7 +55,7 @@ class LocalWhisperService(
             Log.d(TAG, "Whisper vocab not installed for $filename")
             return null
         }
-        modelRuntime.ensureLoaded(filename, file.length())
+        modelRuntime.ensureLoaded(filename, file.length()) { releaseModel(it) }
         synchronized(engineLock) {
             return try {
                 val engine = getEngine(file.absolutePath, vocabFile.absolutePath, isMultilingual(filename))
@@ -75,7 +75,7 @@ class LocalWhisperService(
         if (filename.isBlank()) return false
         val file = modelDownloadManager.getModelFile(filename) ?: return false
         val vocabFile = resolveWhisperVocabFile(filename) ?: return false
-        modelRuntime.ensureLoaded(filename, file.length())
+        modelRuntime.ensureLoaded(filename, file.length()) { releaseModel(it) }
         synchronized(engineLock) {
             return try {
                 getEngine(file.absolutePath, vocabFile.absolutePath, isMultilingual(filename))
@@ -149,8 +149,6 @@ class LocalWhisperService(
         }
     }
 }
-
-// LocalGemmaService DEPRECATED - Use GeminiNanoService instead (AICore / ML Kit GenAI)
 
 data class LocalModelInfo(
     val id: String,

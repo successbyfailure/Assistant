@@ -4,22 +4,16 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 
 class ModelDownloadManager(private val context: Context) {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
-    
+    private val client = HttpClientProvider.download
+
     private val modelsDir = File(context.filesDir, "models").apply { mkdirs() }
 
     data class ModelInfo(
@@ -555,20 +549,28 @@ class ModelDownloadManager(private val context: Context) {
 
     fun getInstalledModels(models: List<ModelInfo> = AVAILABLE_MODELS): List<ModelInfo> {
         return models.filter { model ->
-            val file = File(modelsDir, model.filename)
-            file.exists() && file.length() > 0
+            getModelFile(model.filename) != null
         }
     }
 
     fun isModelInstalled(modelInfo: ModelInfo): Boolean {
-        val file = File(modelsDir, modelInfo.filename)
-        return file.exists() && file.length() > 0
+        return getModelFile(modelInfo.filename) != null
     }
 
     fun deleteModel(modelInfo: ModelInfo): Boolean {
         return try {
-            val file = File(modelsDir, modelInfo.filename)
-            val deleted = file.delete()
+            val primary = File(modelsDir, modelInfo.filename)
+            var deleted = false
+            if (primary.exists()) {
+                deleted = primary.delete() || deleted
+            }
+            val legacyName = legacyFilenameFor(modelInfo.filename)
+            if (legacyName != null) {
+                val legacy = File(modelsDir, legacyName)
+                if (legacy.exists()) {
+                    deleted = legacy.delete() || deleted
+                }
+            }
             if (deleted) {
                 Log.d(TAG, "Model deleted: ${modelInfo.filename}")
             }
@@ -581,7 +583,19 @@ class ModelDownloadManager(private val context: Context) {
 
     fun getModelFile(filename: String): File? {
         val file = File(modelsDir, filename)
-        return if (file.exists() && file.length() > 0) file else null
+        if (file.exists() && file.length() > 0) return file
+        val legacyName = legacyFilenameFor(filename) ?: return null
+        val legacy = File(modelsDir, legacyName)
+        return if (legacy.exists() && legacy.length() > 0) legacy else null
+    }
+
+    private fun legacyFilenameFor(filename: String): String? {
+        if (!filename.endsWith(".litertlm", ignoreCase = true)) return null
+        return if (filename.contains("-int4")) {
+            filename.replace("-int4", "")
+        } else {
+            null
+        }
     }
 
     private fun isZipFile(file: File): Boolean {
