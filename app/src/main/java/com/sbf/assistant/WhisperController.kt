@@ -24,13 +24,15 @@ class WhisperController(
         usePcm: Boolean = false,
         autoStopOnSilence: Boolean = false,
         onSilenceDetected: (() -> Unit)? = null,
-        onReadyToSpeak: (() -> Unit)? = null
+        onReadyToSpeak: (() -> Unit)? = null,
+        onAmplitudeUpdate: ((Float) -> Unit)? = null
     ): File? {
         currentFile = audioRecorder.startRecording(
             usePcm = usePcm,
             autoStopOnSilence = autoStopOnSilence,
             onSilenceDetected = onSilenceDetected,
-            onReadyToSpeak = onReadyToSpeak
+            onReadyToSpeak = onReadyToSpeak,
+            onAmplitudeUpdate = onAmplitudeUpdate
         )
         isRecording = currentFile != null
         return currentFile

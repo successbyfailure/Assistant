@@ -15,19 +15,17 @@ class AssistantVoiceInteractionService : VoiceInteractionService() {
     override fun onReady() {
         super.onReady()
         Log.d(TAG, "VoiceInteractionService onReady()")
-
-        // Check if we're the active assistant
-        val isActive = isActiveService(this, ComponentName(this, AssistantVoiceInteractionService::class.java))
-        Log.d(TAG, "Is active service: $isActive")
-    }
-
-    override fun onShutdown() {
-        Log.d(TAG, "VoiceInteractionService onShutdown()")
-        super.onShutdown()
+        
+        // Check if we are actually the active assistant
+        if (isActiveService(this, ComponentName(this, AssistantVoiceInteractionService::class.java))) {
+            Log.i(TAG, "Assistant is ACTIVE and READY")
+        } else {
+            Log.w(TAG, "Assistant is NOT the active service in settings")
+        }
     }
 
     override fun onLaunchVoiceAssistFromKeyguard() {
-        Log.d(TAG, "onLaunchVoiceAssistFromKeyguard() - launching session")
+        Log.d(TAG, "onLaunchVoiceAssistFromKeyguard()")
         showSession(Bundle(), VoiceInteractionSession.SHOW_WITH_ASSIST)
     }
 

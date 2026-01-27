@@ -25,19 +25,31 @@ class TtsController(
             }
         }
 
-    fun speak(text: String) {
-        if (!enabled) return
-        val ttsPref = settingsManager.getCategoryConfig(Category.TTS).primary
-        if (ttsPref == null || ttsPref.endpointId == "system") {
-            ttsManager.speak(text)
+    private var onSpeechComplete: (() -> Unit)? = null
+
+    fun speak(text: String, onComplete: (() -> Unit)? = null) {
+        onSpeechComplete = onComplete
+        if (!enabled) {
+            onComplete?.invoke()
             return
         }
-        val endpoint = settingsManager.getEndpoint(ttsPref.endpointId) ?: return
+        val ttsPref = settingsManager.getCategoryConfig(Category.TTS).primary
+        if (ttsPref == null || ttsPref.endpointId == "system") {
+            ttsManager.speak(text, onComplete = {
+                mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
+            })
+            return
+        }
+        val endpoint = settingsManager.getEndpoint(ttsPref.endpointId) ?: run {
+            onComplete?.invoke()
+            return
+        }
         OpenAiClient(endpoint).generateSpeech(text, ttsPref.modelName) { file, error ->
             if (file != null) {
                 playFile(file)
-            } else if (error != null) {
-                Log.w(TAG, "TTS generation failed: ${error.message}")
+            } else {
+                Log.w(TAG, "TTS generation failed: ${error?.message}")
+                mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
             }
         }
     }
@@ -47,6 +59,7 @@ class TtsController(
         ttsMediaPlayer?.stop()
         ttsMediaPlayer?.release()
         ttsMediaPlayer = null
+        onSpeechComplete = null
     }
 
     fun release() {
@@ -63,12 +76,16 @@ class TtsController(
                         Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
                         mp.release()
                         ttsMediaPlayer = null
+                        onSpeechComplete?.invoke()
+                        onSpeechComplete = null
                         true
                     }
                     setOnCompletionListener { mp ->
                         mp.release()
                         ttsMediaPlayer = null
                         cleanupFile(file)
+                        onSpeechComplete?.invoke()
+                        onSpeechComplete = null
                     }
                     setDataSource(file.absolutePath)
                     prepare()
@@ -79,6 +96,8 @@ class TtsController(
                 ttsMediaPlayer?.release()
                 ttsMediaPlayer = null
                 cleanupFile(file)
+                onSpeechComplete?.invoke()
+                onSpeechComplete = null
             }
         }
     }

@@ -57,6 +57,13 @@
             android:alpha="0.7" />
     </LinearLayout>
 
+    <com.sbf.assistant.VoiceVisualizerView
+        android:id="@+id/voice_visualizer"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_marginHorizontal="16dp"
+        android:visibility="gone" />
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/chat_recycler"
         android:layout_width="match_parent"
@@ -65,6 +72,17 @@
         android:paddingHorizontal="16dp"
         android:paddingVertical="8dp"
         android:clipToPadding="false" />
+
+    <TextView
+        android:id="@+id/tv_ptt_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="Desliza a la derecha para cancelar"
+        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+        android:alpha="0.8"
+        android:visibility="gone"
+        android:layout_marginBottom="4dp" />
 
     <com.google.android.material.divider.MaterialDivider
         android:layout_width="match_parent"
@@ -79,6 +97,46 @@
         android:background="?attr/colorSurface">
 
         <LinearLayout
+            android:id="@+id/stt_buttons_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:gravity="center"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_cancel_stt"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:layout_marginEnd="24dp"
+                app:icon="@android:drawable/ic_menu_delete"
+                app:iconSize="32dp"
+                app:iconPadding="0dp"
+                app:cornerRadius="32dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_stop_stt"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                app:icon="@android:drawable/ic_menu_close_clear_cancel"
+                app:iconSize="32dp"
+                app:iconPadding="0dp"
+                app:cornerRadius="32dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/normal_input_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
@@ -88,8 +146,8 @@
 
             <ImageButton
                 android:id="@+id/mic_button"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_btn_speak_now"
                 app:tint="?attr/colorPrimary"

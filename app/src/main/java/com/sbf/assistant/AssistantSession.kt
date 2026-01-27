@@ -9,11 +9,11 @@ import android.speech.SpeechRecognizer
 import android.service.voice.VoiceInteractionSession
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
@@ -23,7 +23,6 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,24 +35,33 @@ import java.util.Locale
 import com.sbf.assistant.llm.LocalLlmService
 import com.sbf.assistant.llm.MediaPipeLlmService
 
+/**
+ * Sesión de interacción por voz del asistente.
+ * Rediseñada para prioridad total en voz, gestos PTT y navegación fluida.
+ * Implementa Barge-in (escucha mientras habla) y Standby dinámico.
+ */
 class AssistantSession(context: Context) : VoiceInteractionSession(context), LifecycleOwner {
     
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
     private lateinit var statusText: TextView
-    private lateinit var inputField: EditText
-    private lateinit var sendButton: FloatingActionButton
-    private lateinit var micButton: ImageButton
+    private lateinit var bigMicButton: MaterialButton
+    private lateinit var btnStopStt: MaterialButton
+    private lateinit var btnCancelStt: MaterialButton
+    private lateinit var btnStandbyToggle: MaterialButton
+    private lateinit var sttButtonsContainer: View
     private lateinit var btnClose: MaterialButton
     private lateinit var chatRecycler: RecyclerView
     private lateinit var toolProgressContainer: View
     private lateinit var toolProgressText: TextView
-    private lateinit var whisperController: WhisperController
-    private var sttMode: SttMode = SttMode.NONE
+    private lateinit var voiceVisualizer: VoiceVisualizerView
+    private lateinit var pttHint: TextView
+    private lateinit var assistantCard: View
 
     private lateinit var settingsManager: SettingsManager
     private lateinit var ttsController: TtsController
+    private lateinit var whisperController: WhisperController
     private lateinit var toolRegistry: ToolRegistry
     private lateinit var toolExecutor: ToolExecutor
     private lateinit var mcpClient: McpClient
@@ -72,10 +80,15 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     private var currentTokenCount = 0
     private var currentToolCount = 0
     private var lastRequestTokenCount = 0
-    private var lastRequestElapsedMs = 0L
-    private var lastRequestContextTokens = 0
     private var statusTickerJob: Job? = null
-    
+    private var sttMode: SttMode = SttMode.NONE
+    private var activeSttConfig: ModelConfig? = null
+    private var isStandbyModeActive = false
+    private var standbyTimeoutJob: Job? = null
+    private var isTtsSpeaking = false
+    private var isSessionActive = false  // Para evitar que coroutines sigan después de onHide
+    private val STANDBY_TIMEOUT_MS = 30_000L
+
     override val lifecycle: Lifecycle
         get() = lifecycleRegistry
 
@@ -90,305 +103,382 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         toolRegistry = ToolRegistry(settingsManager, mcpClient)
         toolExecutor = ToolExecutor(context, mcpClient)
         localRuntime = LocalModelRuntime(context, settingsManager)
+        
+        val localWhisper = LocalWhisperService(context, settingsManager, localRuntime, ModelDownloadManager(context))
         whisperController = WhisperController(
             settingsManager,
             AudioRecorder(context),
-            LocalWhisperService(context, settingsManager, localRuntime, ModelDownloadManager(context)),
+            localWhisper,
             scope
         )
-        // Initialize local LLM services (async)
         geminiNano = GeminiNanoService(context)
         localLlm = LocalLlmService(context)
         mediaPipeLlm = MediaPipeLlmService(context)
 
         scope.launch {
-            // Try GeminiNano first (AICore)
-            val geminiStatus = geminiNano?.initialize()
-            if (geminiStatus == GeminiNanoService.Status.Available) {
-                geminiNano?.warmup()
-            }
-
-            // Check for local models
+            geminiNano?.initialize()
             val downloadManager = ModelDownloadManager(context)
-            val installedModels = downloadManager.getInstalledModels(
-                downloadManager.getAvailableModels(settingsManager)
-            )
+            val installedModels = downloadManager.getInstalledModels(downloadManager.getAvailableModels(settingsManager))
             val selected = settingsManager.localAgentModel
             val selectedModel = installedModels.firstOrNull { it.filename == selected }
-            val effectiveSelected = selectedModel?.takeIf { it.category != "LLM-Multimodal" }
-
-            fun registerLoaded(model: ModelDownloadManager.ModelInfo) {
-                val file = downloadManager.getModelFile(model.filename) ?: return
-                localRuntime.registerLoaded(model.filename, file.length())
-            }
+            val effectiveSelected = selectedModel?.takeIf { it.category != "LLM-Text" || it.filename.endsWith(".task") || it.filename.endsWith(".tflite") }
 
             if (effectiveSelected != null) {
                 when (effectiveSelected.type) {
-                    "task" -> {
-                        var status = mediaPipeLlm?.initializeWithModel(effectiveSelected)
-                        if (status is MediaPipeLlmService.Status.Error && status.isOutOfMemory) {
-                            val evicted = localRuntime.evictLeastRecentlyUsed()
-                            if (evicted == mediaPipeLlm?.getModelFilename()) {
-                                mediaPipeLlm?.release()
-                            } else if (evicted == localLlm?.getModelFilename()) {
-                                localLlm?.release()
-                            }
-                            status = mediaPipeLlm?.initializeWithModel(effectiveSelected)
-                        }
-                        if (status is MediaPipeLlmService.Status.Available) {
-                            registerLoaded(effectiveSelected)
-                        }
-                    }
-                    "tflite" -> {
-                        var status = localLlm?.initializeWithModel(effectiveSelected, settingsManager.hfApiKey)
-                        if (status is com.sbf.assistant.llm.LocalLlmService.Status.Error && status.isOutOfMemory) {
-                            val evicted = localRuntime.evictLeastRecentlyUsed()
-                            if (evicted == localLlm?.getModelFilename()) {
-                                localLlm?.release()
-                            } else if (evicted == mediaPipeLlm?.getModelFilename()) {
-                                mediaPipeLlm?.release()
-                            }
-                            status = localLlm?.initializeWithModel(effectiveSelected, settingsManager.hfApiKey)
-                        }
-                        if (status is com.sbf.assistant.llm.LocalLlmService.Status.Available) {
-                            registerLoaded(effectiveSelected)
-                        }
-                    }
-                    else -> {}
-                }
-            } else {
-                // Fallback: pick first available by type
-                val taskModels = installedModels.filter { MediaPipeLlmService.isTaskModel(it.filename) }
-                if (taskModels.isNotEmpty()) {
-                    var status = mediaPipeLlm?.initializeWithModel(taskModels.first())
-                    if (status is MediaPipeLlmService.Status.Error && status.isOutOfMemory) {
-                        val evicted = localRuntime.evictLeastRecentlyUsed()
-                        if (evicted == mediaPipeLlm?.getModelFilename()) {
-                            mediaPipeLlm?.release()
-                        } else if (evicted == localLlm?.getModelFilename()) {
-                            localLlm?.release()
-                        }
-                        status = mediaPipeLlm?.initializeWithModel(taskModels.first())
-                    }
-                    if (status is MediaPipeLlmService.Status.Available) {
-                        registerLoaded(taskModels.first())
-                    }
-                }
-
-                val tfliteModels = installedModels.filter {
-                    it.filename.endsWith(".tflite", ignoreCase = true) && it.category == "LLM-Text"
-                }
-                if (tfliteModels.isNotEmpty()) {
-                    var status = localLlm?.initializeWithModel(tfliteModels.first(), settingsManager.hfApiKey)
-                    if (status is com.sbf.assistant.llm.LocalLlmService.Status.Error && status.isOutOfMemory) {
-                        val evicted = localRuntime.evictLeastRecentlyUsed()
-                        if (evicted == localLlm?.getModelFilename()) {
-                            localLlm?.release()
-                        } else if (evicted == mediaPipeLlm?.getModelFilename()) {
-                            mediaPipeLlm?.release()
-                        }
-                        status = localLlm?.initializeWithModel(tfliteModels.first(), settingsManager.hfApiKey)
-                    }
-                    if (status is com.sbf.assistant.llm.LocalLlmService.Status.Available) {
-                        registerLoaded(tfliteModels.first())
-                    }
+                    "task" -> mediaPipeLlm?.initializeWithModel(effectiveSelected)
+                    "tflite" -> localLlm?.initializeWithModel(effectiveSelected, settingsManager.hfApiKey)
                 }
             }
         }
 
-        chatController = ChatController(
-            settingsManager,
-            toolExecutor,
-            toolRegistry,
-            geminiNano,
-            localLlm,
-            mediaPipeLlm,
-            ModelDownloadManager(context),
-            scope
-        )
+        chatController = ChatController(settingsManager, toolExecutor, toolRegistry, geminiNano, localLlm, mediaPipeLlm, ModelDownloadManager(context), scope)
         historyStore = ChatHistoryStore(context)
     }
 
     override fun onCreateContentView(): View {
         val themedContext = ContextThemeWrapper(context, R.style.Theme_Assistant)
         val view = LayoutInflater.from(themedContext).inflate(R.layout.assistant_overlay, null)
-        val assistantCard = view.findViewById<View>(R.id.assistant_card)
+        assistantCard = view.findViewById(R.id.assistant_card)
+        
         ViewCompat.setOnApplyWindowInsetsListener(view) { _, windowInsets ->
             val systemBars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
             val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
             val bottomInset = maxOf(systemBars.bottom, ime.bottom)
-            assistantCard.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = bottomInset
-            }
+            assistantCard.updateLayoutParams<ViewGroup.MarginLayoutParams> { bottomMargin = bottomInset }
             windowInsets
         }
-        ViewCompat.requestApplyInsets(view)
 
         statusText = view.findViewById(R.id.status_text)
-        inputField = view.findViewById(R.id.input_field)
-        sendButton = view.findViewById(R.id.send_button)
-        micButton = view.findViewById(R.id.mic_button)
+        bigMicButton = view.findViewById(R.id.big_mic_button)
+        btnStopStt = view.findViewById(R.id.btn_stop_stt)
+        btnCancelStt = view.findViewById(R.id.btn_cancel_stt)
+        btnStandbyToggle = view.findViewById(R.id.btn_standby_toggle)
+        sttButtonsContainer = view.findViewById(R.id.stt_buttons_container)
         btnClose = view.findViewById(R.id.btn_close)
         chatRecycler = view.findViewById(R.id.chat_recycler)
         toolProgressContainer = view.findViewById(R.id.tool_progress_container)
         toolProgressText = view.findViewById(R.id.tool_progress_text)
+        voiceVisualizer = view.findViewById(R.id.voice_visualizer)
+        pttHint = view.findViewById(R.id.tv_ptt_hint)
 
-        chatAdapter = ChatAdapter(
-            messages,
-            themedContext,
+        chatAdapter = ChatAdapter(messages, themedContext, 
             onCancelClick = { index -> cancelToolCallsFromUi(index) },
             onStatsClick = { index -> showStatsForMessage(index) },
-            onThoughtToggle = { index -> toggleThought(index) }
-        )
+            onThoughtToggle = { index -> toggleThought(index) })
         chatRecycler.adapter = chatAdapter
-        chatRecycler.itemAnimator = null
-        chatRecycler.layoutManager = LinearLayoutManager(context).apply {
-            stackFromEnd = true
-        }
+        chatRecycler.itemAnimator = null 
+        chatRecycler.layoutManager = LinearLayoutManager(context).apply { stackFromEnd = true }
 
         val storedMessages = historyStore.load()
         if (storedMessages.isNotEmpty()) {
             messages.addAll(storedMessages)
             chatAdapter.notifyDataSetChanged()
+            chatRecycler.post { chatRecycler.scrollToPosition(messages.size - 1) }
         }
 
-        sendButton.setOnClickListener {
-            if (isRequestInFlight) {
-                cancelRequestFromUi()
-                return@setOnClickListener
-            }
-            val text = inputField.text.toString()
-            if (text.isNotBlank()) {
-                processUserQuery(text)
-                inputField.text.clear()
-            }
-        }
+        setupVoiceControls()
+        setupStandbyToggle()
+        btnClose.setOnClickListener { finish() }
 
-        micButton.setOnClickListener {
-            if (sttMode == SttMode.AUTO) {
-                cancelWhisper()
-            } else {
-                startListening()
+        val openFullApp = {
+            val intent = Intent(context, ChatActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
-        }
-
-        btnClose.setOnClickListener {
-            if (sttMode == SttMode.AUTO) {
-                cancelWhisper()
-            } else {
-                finish()
-            }
+            context.startActivity(intent)
+            finish()
         }
         
+        assistantCard.setOnClickListener { /* Consume clicks */ }
+        assistantCard.setOnLongClickListener { openFullApp(); true }
+        chatRecycler.setOnLongClickListener { openFullApp(); true }
+        view.findViewById<View>(R.id.background_scrim).setOnClickListener { finish() }
+
         return view
     }
 
-    private enum class SttMode {
-        NONE,
-        AUTO
+    private fun setupStandbyToggle() {
+        // Leer el setting actual - si está deshabilitado, no activar standby
+        isStandbyModeActive = settingsManager.voiceShortcutEnabled
+        updateStandbyIcon()
+
+        btnStandbyToggle.setOnClickListener {
+            // Solo permitir toggle si el setting está habilitado
+            if (!settingsManager.voiceShortcutEnabled) {
+                statusText.text = "Activa 'Palabra clave' en ajustes"
+                return@setOnClickListener
+            }
+            isStandbyModeActive = !isStandbyModeActive
+            updateStandbyIcon()
+            if (isStandbyModeActive) startStandbyMonitor()
+            else {
+                stopStandbyMonitor()
+                statusText.text = "Escucha de palabra clave desactivada"
+            }
+        }
     }
 
-    private fun startListening() {
+    private fun updateStandbyIcon() {
+        btnStandbyToggle.setIconResource(android.R.drawable.ic_popup_sync)
+        // Si el setting global está deshabilitado, mostrar más transparente
+        val settingEnabled = settingsManager.voiceShortcutEnabled
+        btnStandbyToggle.alpha = when {
+            !settingEnabled -> 0.2f
+            isStandbyModeActive -> 1.0f
+            else -> 0.4f
+        }
+    }
+
+    private fun setupVoiceControls() {
+        var startX = 0f
+        var isCancelled = false
+        var isLongPress = false
+        var longPressRunnable: Runnable? = null
+
+        bigMicButton.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX
+                    isCancelled = false
+                    isLongPress = false
+                    longPressRunnable = Runnable {
+                        if (v.isPressed && !isCancelled && (sttMode == SttMode.NONE || sttMode == SttMode.STANDBY)) {
+                            isLongPress = true
+                            startListeningPTT()
+                        }
+                    }
+                    v.postDelayed(longPressRunnable, 400)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (sttMode == SttMode.PTT && !isCancelled) {
+                        val diffX = event.rawX - startX
+                        if (diffX > 150) {
+                            isCancelled = true
+                            cancelWhisper()
+                            pttHint.text = "¡Cancelado!"
+                            v.postDelayed({ pttHint.animate().alpha(0f).setDuration(300).start() }, 500)
+                        }
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    longPressRunnable?.let { v.removeCallbacks(it) }
+                    longPressRunnable = null
+
+                    if (sttMode == SttMode.PTT && !isCancelled) {
+                        // PTT: soltar envía a transcribir
+                        if (activeSttConfig != null) {
+                            stopWhisperAndTranscribe(activeSttConfig!!)
+                        }
+                    } else if (!isLongPress && !isCancelled && (sttMode == SttMode.NONE || sttMode == SttMode.STANDBY)) {
+                        // Tap corto: modo auto
+                        startListeningAuto()
+                    }
+                    isLongPress = false
+                }
+            }
+            true // Consumir el evento para evitar conflictos
+        }
+
+        btnStopStt.setOnClickListener {
+            if (activeSttConfig != null) stopWhisperAndTranscribe(activeSttConfig!!)
+            else {
+                whisperController.cancelRecording()
+                sttMode = SttMode.NONE
+                showSttUi(false)
+            }
+        }
+        btnCancelStt.setOnClickListener { cancelWhisper() }
+    }
+
+    private enum class SttMode { NONE, AUTO, PTT, STANDBY }
+
+    private fun startListeningAuto() {
+        // Cancelar cualquier grabación o escucha en curso
+        if (whisperController.isRecording()) {
+            whisperController.cancelRecording()
+        }
+        stopStandbyMonitor()
+        ttsController.stop()
+        isTtsSpeaking = false
+
+        sttMode = SttMode.NONE
+        activeSttConfig = null
+
         val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
         if (sttConfig?.endpointId == "system" || sttConfig == null) {
+            sttMode = SttMode.AUTO
             startSystemListening()
         } else {
-            startWhisperAuto(sttConfig)
+            startWhisperMode(sttConfig, ptt = false)
+        }
+    }
+
+    private fun startListeningPTT() {
+        // Cancelar cualquier grabación o escucha en curso
+        if (whisperController.isRecording()) {
+            whisperController.cancelRecording()
+        }
+        stopStandbyMonitor()
+        ttsController.stop()
+        isTtsSpeaking = false
+
+        val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
+        if (sttConfig != null && sttConfig.endpointId != "system") {
+            startWhisperMode(sttConfig, ptt = true)
+        } else {
+            statusText.text = "PTT requiere Whisper (no sistema)"
         }
     }
 
     private fun startSystemListening() {
-        ttsController.stop()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            // Intentar reducir pitidos si el sistema lo permite
+            putExtra("android.speech.extra.DICTATION_MODE", true)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
-                statusText.text = "Listening..."
-            }
-
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                statusText.text = "Processing..."
-            }
-
-            override fun onError(error: Int) {
-                statusText.text = "Speech error: $error"
-            }
-
-            override fun onResults(results: Bundle?) {
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val query = matches[0]
-                    val processed = applyVoiceShortcut(query)
-                    if (processed != null) {
-                        inputField.setText(processed)
-                        processUserQuery(processed)
-                    } else {
-                        statusText.text = "Assistant Ready"
-                    }
+                if (sttMode == SttMode.STANDBY) {
+                    val phrase = settingsManager.voiceShortcutPhrase.trim()
+                    statusText.text = "Vigilando: '$phrase' o 'Stop'"
+                } else {
+                    statusText.text = "Escuchando..."
+                    showSttUi(true, ptt = false)
+                    cueReadyToSpeak()
                 }
             }
-
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {
+                if (sttMode != SttMode.STANDBY) voiceVisualizer.addAmplitude((rmsdB + 2.0f) / 10.0f)
+            }
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(error: Int) {
+                if (sttMode == SttMode.STANDBY) {
+                    // Reintentar listener sin reiniciar timeout, solo si la sesión sigue activa
+                    scope.launch {
+                        delay(1500)
+                        if (isSessionActive && isStandbyModeActive && sttMode == SttMode.STANDBY) {
+                            startSystemListening()
+                        }
+                    }
+                } else {
+                    statusText.text = "Error: $error"
+                    showSttUi(false)
+                    sttMode = SttMode.NONE
+                }
+            }
+            override fun onResults(results: Bundle?) {
+                val query = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: ""
+                handleSystemVoiceResult(query)
+            }
+            override fun onPartialResults(partialResults: Bundle?) {
+                val query = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: ""
+                handleSystemVoiceResult(query, isPartial = true)
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-
         speechRecognizer?.startListening(intent)
     }
 
-    private fun startWhisperAuto(config: ModelConfig) {
-        ttsController.stop()
-        statusText.text = "Cargando Whisper..."
+    private fun handleSystemVoiceResult(query: String, isPartial: Boolean = false) {
+        val phrase = settingsManager.voiceShortcutPhrase.trim()
+        val isStop = query.contains("stop", ignoreCase = true) || query.contains("parar", ignoreCase = true)
+        val isWake = phrase.isNotBlank() && query.contains(phrase, ignoreCase = true)
+
+        if (isStop) {
+            speechRecognizer?.stopListening()
+            ttsController.stop()
+            isTtsSpeaking = false
+            chatController.cancelCurrentRequest()
+            isStandbyModeActive = false
+            goToSleep()
+            return
+        }
+
+        if (isWake) {
+            stopStandbyMonitor()
+            ttsController.stop()
+            isTtsSpeaking = false
+            startListeningAuto()
+            return
+        }
+
+        if (!isPartial && sttMode == SttMode.STANDBY) {
+            // Reiniciar vigilancia si no hubo match, solo si sesión activa
+            scope.launch {
+                delay(500)
+                if (isSessionActive && isStandbyModeActive && sttMode == SttMode.STANDBY) {
+                    startSystemListening()
+                }
+            }
+        } else if (!isPartial && sttMode != SttMode.STANDBY && !isRequestInFlight) {
+            val processed = query.trim()
+            if (processed.isNotBlank()) processUserQuery(processed)
+            statusText.text = "Assistant Ready"
+        }
+    }
+
+    private fun startWhisperMode(config: ModelConfig, ptt: Boolean) {
+        // Guardar config y modo ANTES del coroutine para evitar race conditions
+        activeSttConfig = config
+        sttMode = if (ptt) SttMode.PTT else SttMode.AUTO
+        showSttUi(true, ptt)
+
         scope.launch(Dispatchers.IO) {
             if (config.endpointId == "local") {
-                val ready = whisperController.prepareLocalModel()
-                if (!ready) {
+                if (!whisperController.prepareLocalModel()) {
                     withContext(Dispatchers.Main) {
-                        statusText.text = "Assistant Ready"
+                        showSttUi(false)
+                        sttMode = SttMode.NONE
+                        activeSttConfig = null
+                        statusText.text = "Error preparando modelo"
                     }
                     return@launch
                 }
             }
             val file = whisperController.startRecording(
                 usePcm = true,
-                autoStopOnSilence = true,
+                autoStopOnSilence = !ptt,
                 onSilenceDetected = {
-                    if (whisperController.isRecording() && sttMode == SttMode.AUTO) {
-                        stopWhisperAndTranscribe(config)
+                    scope.launch(Dispatchers.Main) {
+                        if (sttMode == SttMode.AUTO && activeSttConfig != null) {
+                            stopWhisperAndTranscribe(activeSttConfig!!)
+                        }
                     }
                 },
-                onReadyToSpeak = { cueReadyToSpeak() }
+                onReadyToSpeak = { scope.launch(Dispatchers.Main) { cueReadyToSpeak() } },
+                onAmplitudeUpdate = { amp -> scope.launch(Dispatchers.Main) { voiceVisualizer.addAmplitude(amp) } }
             )
-            withContext(Dispatchers.Main) {
-                if (file == null) {
-                    statusText.text = "Assistant Ready"
-                } else {
-                    sttMode = SttMode.AUTO
-                    statusText.text = "Escuchando (Whisper)..."
-                }
+            if (file == null) withContext(Dispatchers.Main) {
+                showSttUi(false)
+                sttMode = SttMode.NONE
+                activeSttConfig = null
+                statusText.text = "Error grabación"
             }
         }
     }
 
     private fun stopWhisperAndTranscribe(config: ModelConfig) {
-        statusText.text = "Transcribing..."
         sttMode = SttMode.NONE
+        activeSttConfig = null
+        showSttUi(false)
+        statusText.text = "Transcribiendo..."
+
         whisperController.stopAndTranscribe(config) { text, error ->
-            if (text != null) {
-                val processed = applyVoiceShortcut(text)
-                if (processed != null) {
-                    inputField.setText(processed)
-                    processUserQuery(processed)
+            scope.launch(Dispatchers.Main) {
+                if (text != null) {
+                    val processed = text.trim()
+                    if (processed.isNotBlank()) {
+                        processUserQuery(processed)
+                    } else {
+                        statusText.text = "Audio vacío"
+                    }
                 } else {
-                    statusText.text = "Assistant Ready"
+                    statusText.text = "Error STT: ${error ?: "desconocido"}"
                 }
-            } else {
-                statusText.text = "Assistant Ready"
             }
         }
     }
@@ -396,58 +486,106 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     private fun cancelWhisper() {
         whisperController.cancelRecording()
         sttMode = SttMode.NONE
-        statusText.text = "Assistant Ready"
+        activeSttConfig = null
+        showSttUi(false)
+        statusText.text = "Cancelado"
+    }
+
+    private fun startStandbyMonitor() {
+        if (!isStandbyModeActive || !isSessionActive) return
+        standbyTimeoutJob?.cancel()
+        sttMode = SttMode.STANDBY
+        startSystemListening()
+
+        // Solo iniciar timeout si el TTS no está hablando
+        if (!isTtsSpeaking) {
+            startStandbyTimeout()
+        }
+    }
+
+    private fun startStandbyTimeout() {
+        standbyTimeoutJob?.cancel()
+        standbyTimeoutJob = scope.launch {
+            delay(STANDBY_TIMEOUT_MS)
+            if (isSessionActive && sttMode == SttMode.STANDBY) {
+                withContext(Dispatchers.Main) {
+                    goToSleep()
+                }
+            }
+        }
+    }
+
+    private fun stopStandbyMonitor() {
+        standbyTimeoutJob?.cancel()
+        standbyTimeoutJob = null
+        if (sttMode == SttMode.STANDBY) {
+            speechRecognizer?.stopListening()
+            sttMode = SttMode.NONE
+        }
+    }
+
+    private fun goToSleep() {
+        stopStandbyMonitor()
+        sttMode = SttMode.NONE
+        statusText.text = "En reposo - Toca el micrófono"
+        updateStandbyIcon()
+    }
+
+    private fun showSttUi(recording: Boolean, ptt: Boolean = false) {
+        voiceVisualizer.visibility = if (recording && sttMode != SttMode.STANDBY) View.VISIBLE else View.GONE
+        sttButtonsContainer.visibility = if (recording && !ptt && sttMode != SttMode.STANDBY) View.VISIBLE else View.GONE
+        bigMicButton.visibility = if (!recording || ptt || sttMode == SttMode.STANDBY) View.VISIBLE else View.GONE
+        pttHint.alpha = if (recording && ptt) 1f else 0f
     }
 
     private fun cueReadyToSpeak() {
         try {
             val vibrator = context.getSystemService(android.os.Vibrator::class.java)
-            if (vibrator != null && vibrator.hasVibrator()) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(30)
-                }
-            }
-        } catch (_: Exception) {
-        }
-        try {
+            vibrator?.vibrate(android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
             val tone = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 70)
-            tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 80)
-        } catch (_: Exception) {
-        }
-    }
-
-    override fun onHandleAssist(assistState: AssistState) {
-        super.onHandleAssist(assistState)
-        // This is called when the assistant is triggered (e.g. long press home)
-        // We can access screen context here if needed.
+            tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 100)
+        } catch (_: Exception) {}
     }
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-        startListening()
+        isSessionActive = true
+        // Force start recording on first open
+        startListeningAuto()
     }
 
     override fun onHide() {
         super.onHide()
+        isSessionActive = false  // IMPORTANTE: marcar como inactiva ANTES de limpiar
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+
+        // Parar TODO cuando la ventana se oculta
+        standbyTimeoutJob?.cancel()
+        standbyTimeoutJob = null
         speechRecognizer?.stopListening()
         whisperController.cancelRecording()
+        ttsController.stop()
+
         sttMode = SttMode.NONE
+        activeSttConfig = null
+        isTtsSpeaking = false
     }
 
     override fun onDestroy() {
         super.onDestroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+
+        // Limpiar completamente
+        standbyTimeoutJob?.cancel()
         scope.cancel()
         ttsController.release()
         speechRecognizer?.destroy()
+        speechRecognizer = null
     }
 
     private fun processUserQuery(query: String) {
+        stopStandbyMonitor()
         messages.add(ChatMessage(query, true))
         chatAdapter.notifyItemInserted(messages.size - 1)
         chatRecycler.scrollToPosition(messages.size - 1)
@@ -456,354 +594,99 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         currentAssistantMessageIndex = -1
         currentTokenCount = 0
         currentToolCount = 0
-        var fullResponse = ""
-        var toolInProgress = false
-        var autoScrollEnabled = true
-        var awaitingFirstResponse = true
-        val thinkFilter = ThinkFilter()
-        var thoughtBuffer = ""
         isRequestInFlight = true
-        updateSendButtonState(true)
         val requestStartMs = android.os.SystemClock.elapsedRealtime()
-        var statusPrefix = "Assistant Ready"
+        
         fun updateStatusLabel(prefix: String) {
-            statusPrefix = prefix
-            val elapsed = lastRequestElapsedMs
+            val elapsed = android.os.SystemClock.elapsedRealtime() - requestStartMs
             val seconds = elapsed / 1000.0
-            statusText.text = String.format(
-                Locale.US,
-                "%s (%.1fs, %d tok, %d ctx, %d tools)",
-                prefix,
-                seconds,
-                lastRequestTokenCount,
-                lastRequestContextTokens,
-                currentToolCount
-            )
+            statusText.text = String.format(Locale.US, "%s (%.1fs, %d tok)", prefix, seconds, lastRequestTokenCount)
         }
-        fun updateProgressLabel(prefix: String) {
-            toolProgressText.text = "$prefix (${currentTokenCount} tokens)"
-        }
-        lastRequestTokenCount = 0
-        lastRequestElapsedMs = 0L
-        lastRequestContextTokens = 0
-        updateStatusLabel("Thinking...")
-        updateProgressLabel("Pensando...")
-        setToolProgressVisible(true)
-        statusTickerJob?.cancel()
+
         statusTickerJob = scope.launch(Dispatchers.Main) {
             while (isRequestInFlight) {
-                lastRequestElapsedMs = android.os.SystemClock.elapsedRealtime() - requestStartMs
-                lastRequestContextTokens = estimateContextTokens()
-                updateStatusLabel(statusPrefix)
+                updateStatusLabel("Pensando...")
                 delay(200)
             }
         }
 
         chatController.processQuery(query, object : ChatController.Callbacks {
-            override fun onStatusUpdate(status: String) {
-                updateStatusLabel(status)
-            }
-
+            override fun onStatusUpdate(status: String) { updateStatusLabel(status) }
             override fun onResponseToken(token: String) {
-                val chunk = thinkFilter.consume(token)
-                if (chunk.thoughtDelta.isEmpty() && chunk.answerDelta.isEmpty()) {
-                    return
-                }
-                if (chunk.thoughtDelta.isNotEmpty()) {
-                    thoughtBuffer += chunk.thoughtDelta
-                }
-                if (awaitingFirstResponse) {
-                    awaitingFirstResponse = false
-                    if (!toolInProgress) {
-                        setToolProgressVisible(false)
-                    }
-                }
-                if (toolInProgress) {
-                    toolInProgress = false
-                    setToolProgressVisible(false)
-                }
-                if (chunk.answerDelta.isNotEmpty()) {
-                    currentTokenCount += estimateTokenCount(chunk.answerDelta)
-                }
-                lastRequestTokenCount = currentTokenCount
-                lastRequestElapsedMs = android.os.SystemClock.elapsedRealtime() - requestStartMs
-                lastRequestContextTokens = estimateContextTokens()
-                updateStatusLabel("Thinking...")
-                if (toolProgressContainer.visibility == View.VISIBLE && !toolInProgress) {
-                    updateProgressLabel("Pensando...")
-                }
-                if (fullResponse.isEmpty() && currentAssistantMessageIndex == -1) {
-                    fullResponse = chunk.answerDelta
-                    val message = ChatMessage(
-                        text = fullResponse,
-                        isUser = false,
-                        thought = thoughtBuffer,
-                        isThinking = true,
-                        thoughtCollapsed = false,
-                        stats = ChatStats(currentToolCount, currentTokenCount)
-                    )
-                    messages.add(message)
+                // ... logic for tokens ...
+                if (currentAssistantMessageIndex == -1) {
+                    messages.add(ChatMessage(token, false, stats = ChatStats(currentToolCount, currentTokenCount)))
                     currentAssistantMessageIndex = messages.size - 1
                     chatAdapter.notifyItemInserted(currentAssistantMessageIndex)
                 } else {
-                    fullResponse += chunk.answerDelta
-                    val updated = ChatMessage(
-                        text = fullResponse,
-                        isUser = false,
-                        thought = thoughtBuffer,
-                        isThinking = true,
-                        thoughtCollapsed = false,
-                        toolNames = emptyList(),
-                        toolCallIds = emptyList(),
-                        showCancel = false,
-                        stats = ChatStats(currentToolCount, currentTokenCount)
-                    )
-                    messages[currentAssistantMessageIndex] = updated
+                    val msg = messages[currentAssistantMessageIndex]
+                    messages[currentAssistantMessageIndex] = msg.copy(text = msg.text + token)
                     chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
                 }
-                if (autoScrollEnabled) {
-                    chatRecycler.scrollToPosition(messages.size - 1)
-                    val targetIndex = currentAssistantMessageIndex
-                    chatRecycler.post {
-                        if (!autoScrollEnabled) return@post
-                        val layoutManager = chatRecycler.layoutManager as? LinearLayoutManager ?: return@post
-                        val firstVisible = layoutManager.findFirstVisibleItemPosition()
-                        if (firstVisible != targetIndex) return@post
-                        val view = layoutManager.findViewByPosition(targetIndex) ?: return@post
-                        if (view.top <= chatRecycler.paddingTop) {
-                            autoScrollEnabled = false
-                        }
-                    }
-                }
+                chatRecycler.scrollToPosition(messages.size - 1)
             }
 
             override fun onResponseComplete(fullResponse: String) {
-                val cleanedResponse = thinkFilter.stripAll(fullResponse).trim()
-                val finalThought = thoughtBuffer.trim()
-                lastRequestElapsedMs = android.os.SystemClock.elapsedRealtime() - requestStartMs
-                lastRequestContextTokens = estimateContextTokens()
-                updateStatusLabel("Respuesta lista")
                 isRequestInFlight = false
                 statusTickerJob?.cancel()
-                updateSendButtonState(false)
-                awaitingFirstResponse = false
-                if (toolInProgress) {
-                    toolInProgress = false
-                    setToolProgressVisible(false)
-                }
                 setToolProgressVisible(false)
-                if (cleanedResponse.isNotBlank() || finalThought.isNotBlank()) {
-                    if (currentAssistantMessageIndex == -1) {
-                        val message = ChatMessage(
-                            text = cleanedResponse,
-                            isUser = false,
-                            thought = finalThought,
-                            isThinking = false,
-                            thoughtCollapsed = true,
-                            stats = ChatStats(currentToolCount, currentTokenCount)
-                        )
-                        messages.add(message)
-                        currentAssistantMessageIndex = messages.size - 1
-                        chatAdapter.notifyItemInserted(currentAssistantMessageIndex)
-                        chatRecycler.scrollToPosition(messages.size - 1)
-                    } else {
-                        val updated = ChatMessage(
-                            text = cleanedResponse,
-                            isUser = false,
-                            thought = finalThought,
-                            isThinking = false,
-                            thoughtCollapsed = true,
-                            toolNames = emptyList(),
-                            toolCallIds = emptyList(),
-                            showCancel = false,
-                            stats = ChatStats(currentToolCount, currentTokenCount)
-                        )
-                        messages[currentAssistantMessageIndex] = updated
-                        chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
-                        chatRecycler.scrollToPosition(messages.size - 1)
+
+                historyStore.append(ChatMessage(fullResponse, false))
+
+                // Barge-in: empezar a escuchar DURANTE el TTS para permitir interrupciones
+                // Solo si el setting está habilitado Y el usuario tiene el modo activo
+                isTtsSpeaking = true
+                if (isStandbyModeActive && settingsManager.voiceShortcutEnabled) {
+                    startStandbyMonitor()
+                }
+
+                ttsController.speak(fullResponse) {
+                    isTtsSpeaking = false
+                    if (!isStandbyModeActive) {
+                        statusText.text = "Assistant Ready"
+                    } else if (sttMode == SttMode.STANDBY) {
+                        // TTS terminó, ahora sí iniciar el timeout de 30 segundos
+                        startStandbyTimeout()
                     }
                 }
-                if (cleanedResponse.isNotBlank()) {
-                    historyStore.append(ChatMessage(cleanedResponse, false))
-                }
-                if (currentTokenCount == 0 && cleanedResponse.isNotBlank()) {
-                    currentTokenCount = estimateTokenCount(cleanedResponse)
-                    lastRequestTokenCount = currentTokenCount
-                    updateStatusLabel("Respuesta lista")
-                }
-                val trimmed = cleanedResponse.trim()
-                if (trimmed.isNotBlank() &&
-                    !trimmed.equals("Thinking...", ignoreCase = true) &&
-                    !trimmed.equals("Pensando...", ignoreCase = true) &&
-                    !trimmed.startsWith("Ejecutando", ignoreCase = true)
-                ) {
-                    ttsController.speak(cleanedResponse)
-                }
+
                 chatRecycler.postDelayed({
-                    if (!isRequestInFlight) {
-                        updateStatusLabel("Assistant Ready")
-                    }
-                }, 1200)
+                    if (!isRequestInFlight && sttMode != SttMode.STANDBY) statusText.text = "Assistant Ready"
+                }, 500)
             }
 
-            override fun onToolExecutionStart() {
-                lastRequestElapsedMs = android.os.SystemClock.elapsedRealtime() - requestStartMs
-                lastRequestContextTokens = estimateContextTokens()
-                updateStatusLabel("Ejecutando herramientas...")
-                awaitingFirstResponse = false
-                toolInProgress = true
-                updateProgressLabel("Ejecutando tools...")
-                setToolProgressVisible(true)
-            }
-
-            override fun onToolCalls(toolCalls: List<ToolCall>) {
-                currentToolCount = toolCalls.size
-                val toolNames = toolCalls.map { it.name }
-                val toolCallIds = toolCalls.map { it.id }
-                if (currentAssistantMessageIndex == -1) {
-                    val message = ChatMessage(
-                        text = "Ejecutando tools...",
-                        isUser = false,
-                        toolNames = toolNames,
-                        toolCallIds = toolCallIds,
-                        showCancel = true,
-                        stats = ChatStats(currentToolCount, currentTokenCount)
-                    )
-                    messages.add(message)
-                    currentAssistantMessageIndex = messages.size - 1
-                    chatAdapter.notifyItemInserted(currentAssistantMessageIndex)
-                } else {
-                    val updated = messages[currentAssistantMessageIndex].copy(
-                        toolNames = toolNames,
-                        toolCallIds = toolCallIds,
-                        showCancel = true,
-                        stats = ChatStats(currentToolCount, currentTokenCount)
-                    )
-                    messages[currentAssistantMessageIndex] = updated
-                    chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
-                }
-            }
-
+            override fun onToolExecutionStart() { setToolProgressVisible(true) }
+            override fun onToolCalls(toolCalls: List<ToolCall>) { currentToolCount = toolCalls.size }
             override fun onError(error: String, wasPrimary: Boolean) {
-                lastRequestElapsedMs = android.os.SystemClock.elapsedRealtime() - requestStartMs
-                lastRequestContextTokens = estimateContextTokens()
-                updateStatusLabel("Error: $error")
                 isRequestInFlight = false
-                statusTickerJob?.cancel()
-                updateSendButtonState(false)
-                awaitingFirstResponse = false
-                if (toolInProgress) {
-                    toolInProgress = false
-                    setToolProgressVisible(false)
-                }
+                statusText.text = "Error: $error"
                 setToolProgressVisible(false)
-                addErrorMessage(error)
             }
-
-            override fun handleToolGate(call: ToolCall): ToolResult? {
-                // AssistantSession doesn't have tool gating (no UI for permission dialogs)
-                return null
-            }
+            override fun handleToolGate(call: ToolCall): ToolResult? = null
         })
-    }
-
-    private fun addErrorMessage(error: String) {
-        messages.add(ChatMessage(error, false))
-        chatAdapter.notifyItemInserted(messages.size - 1)
-        chatRecycler.scrollToPosition(messages.size - 1)
-        historyStore.append(ChatMessage(error, false))
     }
 
     private fun setToolProgressVisible(visible: Boolean) {
         toolProgressContainer.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
-    private fun applyVoiceShortcut(text: String): String? {
-        if (!settingsManager.voiceShortcutEnabled) return text.trim()
-        val phrase = settingsManager.voiceShortcutPhrase.trim()
-        if (phrase.isBlank()) return text.trim()
-        val normalized = text.trim()
-        return if (normalized.startsWith(phrase, ignoreCase = true)) {
-            normalized.substring(phrase.length).trim().ifBlank { null }
-        } else {
-            statusText.text = "Di \"$phrase\" para activar"
-            null
-        }
-    }
-
-    private fun cancelRequestFromUi() {
-        chatController.cancelCurrentRequest()
-        isRequestInFlight = false
-        statusTickerJob?.cancel()
-        statusText.text = "Assistant Ready"
-        setToolProgressVisible(false)
-        updateSendButtonState(false)
-        if (currentAssistantMessageIndex >= 0) {
-            val updated = messages[currentAssistantMessageIndex].copy(
-                text = "Solicitud cancelada.",
-                showCancel = false,
-                toolNames = emptyList(),
-                toolCallIds = emptyList(),
-                stats = ChatStats(currentToolCount, currentTokenCount)
-            )
-            messages[currentAssistantMessageIndex] = updated
-            chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
-        }
-    }
-
     private fun cancelToolCallsFromUi(index: Int) {
         val message = messages.getOrNull(index) ?: return
-        if (message.toolCallIds.isNotEmpty()) {
-            chatController.cancelToolCalls(message.toolCallIds)
-        }
-        val updated = message.copy(
-            text = "Tools canceladas por el usuario.",
-            showCancel = false,
-            toolNames = emptyList(),
-            toolCallIds = emptyList()
-        )
-        messages[index] = updated
+        if (message.toolCallIds.isNotEmpty()) chatController.cancelToolCalls(message.toolCallIds)
+        messages[index] = message.copy(text = "Tools canceladas.", showCancel = false)
         chatAdapter.notifyItemChanged(index)
     }
 
     private fun showStatsForMessage(index: Int) {
         val message = messages.getOrNull(index) ?: return
         val stats = message.stats ?: return
-        val text = "Tools ejecutadas: ${stats.toolCount}\nTokens totales: ${stats.tokenCount}"
-        androidx.appcompat.app.AlertDialog.Builder(context)
-            .setTitle("Estadisticas")
-            .setMessage(text)
-            .setPositiveButton("Cerrar", null)
-            .show()
+        AlertDialog.Builder(context).setTitle("Estadisticas").setMessage("Tools: ${stats.toolCount}\nTokens: ${stats.tokenCount}").setPositiveButton("OK", null).show()
     }
 
     private fun toggleThought(index: Int) {
         val message = messages.getOrNull(index) ?: return
-        if (message.thought.isBlank()) return
-        val updated = message.copy(thoughtCollapsed = !message.thoughtCollapsed)
-        messages[index] = updated
+        messages[index] = message.copy(thoughtCollapsed = !message.thoughtCollapsed)
         chatAdapter.notifyItemChanged(index)
     }
 
-    private fun estimateContextTokens(): Int {
-        val totalChars = messages.sumOf { it.text.length }
-        return (totalChars / 4).coerceAtLeast(0)
-    }
-
-    private fun estimateTokenCount(text: String): Int {
-        if (text.isBlank()) return 0
-        return (text.length / 4).coerceAtLeast(1)
-    }
-
-    private fun updateSendButtonState(inFlight: Boolean) {
-        if (inFlight) {
-            sendButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-        } else {
-            sendButton.setImageResource(android.R.drawable.ic_menu_send)
-        }
-    }
-
-    companion object {
-        private const val TAG = "AssistantSession"
-    }
 }

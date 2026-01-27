@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/session_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:clickable="true"
@@ -17,40 +18,56 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        app:cardCornerRadius="28dp"
+        app:cardCornerRadius="32dp"
         app:cardElevation="12dp"
         app:shapeAppearanceOverlay="@style/ShapeAppearance.Assistant.TopRounded"
         app:cardBackgroundColor="?attr/colorSurface">
 
-        <LinearLayout
+        <androidx.constraintlayout.widget.ConstraintLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:paddingBottom="24dp">
 
             <View
+                android:id="@+id/pull_handle"
                 android:layout_width="32dp"
                 android:layout_height="4dp"
-                android:layout_gravity="center_horizontal"
                 android:layout_marginTop="12dp"
                 android:background="?attr/colorOutlineVariant"
-                android:alpha="0.4" />
+                android:alpha="0.4"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
 
             <LinearLayout
+                android:id="@+id/header_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:paddingHorizontal="20dp"
+                android:paddingHorizontal="24dp"
                 android:paddingTop="8dp"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                app:layout_constraintTop_toBottomOf="@id/pull_handle">
 
                 <TextView
                     android:id="@+id/status_text"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Assistant"
+                    android:text="Assistant Ready"
                     android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
                     android:alpha="0.6" />
+
+                <!-- Standby Keyword Toggle - Icon updated to sync arrows -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_standby_toggle"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:icon="@android:drawable/ic_popup_sync"
+                    app:iconSize="20dp"
+                    app:iconTint="?attr/colorOnSurfaceVariant"
+                    android:alpha="0.5" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_close"
@@ -66,11 +83,12 @@
                 android:id="@+id/tool_progress_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="20dp"
+                android:paddingHorizontal="24dp"
                 android:paddingBottom="8dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:visibility="gone">
+                android:visibility="gone"
+                app:layout_constraintTop_toBottomOf="@id/header_container">
 
                 <com.google.android.material.progressindicator.LinearProgressIndicator
                     android:id="@+id/tool_progress"
@@ -86,72 +104,139 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
-                    android:text="Ejecutando tools"
+                    android:text="Pensando..."
                     android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
                     android:alpha="0.7" />
             </LinearLayout>
 
-            <!-- Changed height to wrap_content to avoid collapse in wrap_content parent -->
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/chat_recycler"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="120dp"
-                android:paddingHorizontal="16dp"
+                app:layout_constrainedHeight="true"
+                app:layout_constraintHeight_max="240dp"
+                android:paddingHorizontal="20dp"
                 android:clipToPadding="false"
-                android:layout_marginBottom="8dp" />
+                android:layout_marginBottom="8dp"
+                app:layout_constraintTop_toBottomOf="@id/tool_progress_container"
+                app:layout_constraintBottom_toTopOf="@id/interaction_area"
+                app:layout_constraintVertical_bias="0"
+                app:layout_constraintVertical_chainStyle="packed" />
 
-            <com.google.android.material.divider.MaterialDivider
+            <FrameLayout
+                android:id="@+id/interaction_area"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:dividerColor="?attr/colorOutlineVariant"
-                android:alpha="0.2" />
+                android:layout_height="180dp"
+                app:layout_constraintTop_toBottomOf="@id/chat_recycler"
+                app:layout_constraintBottom_toTopOf="@id/bottom_hint">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="8dp">
+                <com.sbf.assistant.VoiceVisualizerView
+                    android:id="@+id/voice_visualizer"
+                    android:layout_width="match_parent"
+                    android:layout_height="140dp"
+                    android:layout_gravity="center"
+                    android:layout_marginHorizontal="16dp"
+                    android:visibility="gone" />
 
-                <ImageButton
-                    android:id="@+id/mic_button"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@android:drawable/ic_btn_speak_now"
-                    app:tint="?attr/colorPrimary" />
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/tv_ptt_hint"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    app:hintEnabled="false"
-                    app:boxBackgroundMode="none">
+                    android:gravity="center"
+                    android:text="← Desliza para cancelar →"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:alpha="0"
+                    android:textColor="?attr/colorPrimary"
+                    android:layout_gravity="bottom"
+                    android:layout_marginBottom="16dp" />
 
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/input_field"
-                        android:layout_width="match_parent"
+                <FrameLayout
+                    android:id="@+id/voice_controls_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/big_mic_button"
+                        style="@style/Widget.Material3.Button.ElevatedButton"
+                        android:layout_width="110dp"
+                        android:layout_height="110dp"
+                        android:layout_gravity="center"
+                        app:icon="@android:drawable/ic_btn_speak_now"
+                        app:iconSize="44dp"
+                        app:iconGravity="textStart"
+                        app:iconPadding="0dp"
+                        app:cornerRadius="55dp"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:padding="0dp"
+                        app:elevation="6dp" />
+
+                    <LinearLayout
+                        android:id="@+id/stt_buttons_container"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="@android:color/transparent"
-                        android:hint="Chat with AI..."
-                        android:inputType="textCapSentences"
-                        android:maxLines="5"
-                        android:padding="12dp"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-                </com.google.android.material.textfield.TextInputLayout>
+                        android:layout_gravity="center"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
 
-                <com.google.android.material.floatingactionbutton.FloatingActionButton
-                    android:id="@+id/send_button"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_margin="4dp"
-                    app:fabSize="mini"
-                    app:srcCompat="@android:drawable/ic_menu_send"
-                    app:elevation="0dp"
-                    app:tint="@android:color/white" />
-            </LinearLayout>
-        </LinearLayout>
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_cancel_stt"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="72dp"
+                            android:layout_height="72dp"
+                            app:icon="@android:drawable/ic_menu_delete"
+                            app:iconSize="32dp"
+                            app:iconGravity="textStart"
+                            app:iconPadding="0dp"
+                            app:cornerRadius="36dp"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:padding="0dp"
+                            android:layout_marginEnd="32dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_stop_stt"
+                            style="@style/Widget.Material3.Button"
+                            android:layout_width="72dp"
+                            android:layout_height="72dp"
+                            app:icon="@android:drawable/ic_menu_close_clear_cancel"
+                            app:iconSize="32dp"
+                            app:iconGravity="textStart"
+                            app:iconPadding="0dp"
+                            app:cornerRadius="36dp"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:padding="0dp" />
+                    </LinearLayout>
+                </FrameLayout>
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/bottom_hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Tap para Auto | Mantén para PTT\nMantén el texto para abrir app completa"
+                android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                android:alpha="0.4"
+                android:paddingHorizontal="24dp"
+                app:layout_constraintBottom_toBottomOf="parent" />
+
+            <View
+                android:id="@+id/input_field"
+                android:layout_width="1dp"
+                android:layout_height="1dp"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
     </com.google.android.material.card.MaterialCardView>
 </FrameLayout>
