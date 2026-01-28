@@ -20,4 +20,10 @@
         android:icon="@android:drawable/ic_menu_delete"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/action_check_updates"
+        android:title="Check for Updates"
+        android:icon="@android:drawable/stat_sys_download"
+        app:showAsAction="never" />
+
 </menu>

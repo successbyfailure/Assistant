@@ -68,6 +68,7 @@ class ChatActivity : AppCompatActivity() {
     private var mediaPipeLlm: MediaPipeLlmService? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var historyStore: ChatHistoryStore
+    private lateinit var updateChecker: UpdateChecker
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var chatAdapter: ChatAdapter
@@ -178,6 +179,19 @@ class ChatActivity : AppCompatActivity() {
             if (config != null) stopWhisperAndTranscribe(config)
         }
         btnCancelStt.setOnClickListener { cancelWhisper() }
+
+        // Check for updates
+        updateChecker = UpdateChecker(this)
+        checkForUpdates()
+    }
+
+    private fun checkForUpdates() {
+        scope.launch {
+            val release = updateChecker.checkForUpdate()
+            if (release != null) {
+                updateChecker.showUpdateDialog(this@ChatActivity, release)
+            }
+        }
     }
 
     private fun handleMicClick() {
@@ -545,7 +559,21 @@ class ChatActivity : AppCompatActivity() {
             R.id.action_settings -> { startActivity(Intent(this, MainActivity::class.java)); true }
             R.id.action_tts_toggle -> { ttsController.enabled = !ttsController.enabled; updateTtsMenuIcon(item); true }
             R.id.action_clear_chat -> { messages.clear(); chatController.clearHistory(); chatAdapter.notifyDataSetChanged(); historyStore.clear(); true }
+            R.id.action_check_updates -> { checkForUpdatesManually(); true }
             else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun checkForUpdatesManually() {
+        scope.launch {
+            statusText.text = "Checking for updates..."
+            updateChecker.clearSkippedVersion()
+            val release = updateChecker.checkForUpdate(forceCheck = true)
+            if (release != null) {
+                updateChecker.showUpdateDialog(this@ChatActivity, release)
+            } else {
+                statusText.text = "You have the latest version"
+            }
         }
     }
 
