@@ -71,6 +71,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     private var mediaPipeLlm: MediaPipeLlmService? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var historyStore: ChatHistoryStore
+    private lateinit var warmupManager: WarmupManager
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var chatAdapter: ChatAdapter
@@ -97,6 +98,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         
         settingsManager = SettingsManager(context)
+        warmupManager = WarmupManager(context, settingsManager)
         ttsController = TtsController(context, settingsManager)
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
         mcpClient = McpServerFactory.createClient(context, settingsManager)
@@ -466,6 +468,8 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         activeSttConfig = null
         showSttUi(false)
         statusText.text = "Transcribiendo..."
+        // Warmup LLM while STT is processing
+        warmupManager.warmupLlm()
 
         whisperController.stopAndTranscribe(config) { text, error ->
             scope.launch(Dispatchers.Main) {
@@ -551,6 +555,9 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         super.onShow(args, showFlags)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         isSessionActive = true
+        // Warmup both STT and LLM for voice interaction
+        warmupManager.warmupStt()
+        warmupManager.warmupLlm()
         // Force start recording on first open
         startListeningAuto()
     }
@@ -582,6 +589,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         ttsController.release()
         speechRecognizer?.destroy()
         speechRecognizer = null
+        warmupManager.release()
     }
 
     private fun processUserQuery(query: String) {

@@ -69,6 +69,7 @@ class ChatActivity : AppCompatActivity() {
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var historyStore: ChatHistoryStore
     private lateinit var updateChecker: UpdateChecker
+    private lateinit var warmupManager: WarmupManager
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var chatAdapter: ChatAdapter
@@ -110,6 +111,7 @@ class ChatActivity : AppCompatActivity() {
         setupMicButtonBehavior()
 
         settingsManager = SettingsManager(this)
+        warmupManager = WarmupManager(this, settingsManager)
         ttsController = TtsController(this.applicationContext, settingsManager)
         permissionController = PermissionController(this)
         val localRuntime = LocalModelRuntime(this, settingsManager)
@@ -174,6 +176,11 @@ class ChatActivity : AppCompatActivity() {
         }
 
         micButton.setOnClickListener { handleMicClick() }
+
+        // Warmup LLM when user focuses input field
+        inputField.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) warmupManager.warmupLlm()
+        }
         btnStopStt.setOnClickListener {
             val config = activeSttConfig ?: settingsManager.getCategoryConfig(Category.STT).primary
             if (config != null) stopWhisperAndTranscribe(config)
@@ -201,6 +208,9 @@ class ChatActivity : AppCompatActivity() {
             }
             return
         }
+
+        // Warmup STT when starting voice interaction
+        warmupManager.warmupStt()
 
         val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
         if (sttConfig?.endpointId == "system" || sttConfig == null) {
@@ -344,6 +354,8 @@ class ChatActivity : AppCompatActivity() {
         sttMode = SttMode.NONE
         activeSttConfig = null
         showSttUi(false)
+        // Warmup LLM while STT is processing
+        warmupManager.warmupLlm()
         whisperController.stopAndTranscribe(config) { text, error ->
             if (text != null) {
                 val processed = text.trim()
@@ -547,6 +559,7 @@ class ChatActivity : AppCompatActivity() {
         ttsController.release()
         speechRecognizer?.destroy()
         whisperController.cleanup()
+        warmupManager.release()
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
