@@ -70,6 +70,21 @@ data class CategoryConfig(
     }
 }
 
+/**
+ * Authentication types for MCP servers
+ */
+enum class McpAuthType(val value: String) {
+    NONE("none"),
+    BEARER("bearer"),
+    CUSTOM_HEADERS("custom_headers"),
+    OAUTH("oauth");
+
+    companion object {
+        fun fromValue(value: String): McpAuthType =
+            entries.find { it.value == value } ?: BEARER
+    }
+}
+
 data class McpServerConfig(
     val id: String,
     val name: String,
@@ -78,7 +93,18 @@ data class McpServerConfig(
     val serverName: String,
     val enabled: Boolean = true,
     val ask: Boolean = true,
-    val apiKey: String = ""
+    val apiKey: String = "",
+    // Authentication
+    val authType: McpAuthType = McpAuthType.BEARER,
+    val customHeaders: Map<String, String> = emptyMap(),
+    // OAuth fields
+    val oauthClientId: String = "",
+    val oauthClientSecret: String = "",
+    val oauthTokenUrl: String = "",
+    val oauthScope: String = "",
+    val oauthAccessToken: String = "",
+    val oauthRefreshToken: String = "",
+    val oauthTokenExpiry: Long = 0
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -89,18 +115,44 @@ data class McpServerConfig(
         put("enabled", enabled)
         put("ask", ask)
         put("apiKey", apiKey)
+        put("authType", authType.value)
+        put("customHeaders", JSONObject(customHeaders))
+        put("oauthClientId", oauthClientId)
+        put("oauthClientSecret", oauthClientSecret)
+        put("oauthTokenUrl", oauthTokenUrl)
+        put("oauthScope", oauthScope)
+        put("oauthAccessToken", oauthAccessToken)
+        put("oauthRefreshToken", oauthRefreshToken)
+        put("oauthTokenExpiry", oauthTokenExpiry)
     }
 
     companion object {
-        fun fromJson(json: JSONObject): McpServerConfig = McpServerConfig(
-            id = json.getString("id"),
-            name = json.getString("name"),
-            baseUrl = json.optString("baseUrl", ""),
-            type = json.getString("type"),
-            serverName = json.optString("serverName", json.optString("name", "")),
-            enabled = json.optBoolean("enabled", true),
-            ask = json.optBoolean("ask", true),
-            apiKey = json.optString("apiKey", "")
-        )
+        fun fromJson(json: JSONObject): McpServerConfig {
+            val headersJson = json.optJSONObject("customHeaders")
+            val headers = mutableMapOf<String, String>()
+            headersJson?.keys()?.forEach { key ->
+                headers[key] = headersJson.optString(key, "")
+            }
+
+            return McpServerConfig(
+                id = json.getString("id"),
+                name = json.getString("name"),
+                baseUrl = json.optString("baseUrl", ""),
+                type = json.getString("type"),
+                serverName = json.optString("serverName", json.optString("name", "")),
+                enabled = json.optBoolean("enabled", true),
+                ask = json.optBoolean("ask", true),
+                apiKey = json.optString("apiKey", ""),
+                authType = McpAuthType.fromValue(json.optString("authType", "bearer")),
+                customHeaders = headers,
+                oauthClientId = json.optString("oauthClientId", ""),
+                oauthClientSecret = json.optString("oauthClientSecret", ""),
+                oauthTokenUrl = json.optString("oauthTokenUrl", ""),
+                oauthScope = json.optString("oauthScope", ""),
+                oauthAccessToken = json.optString("oauthAccessToken", ""),
+                oauthRefreshToken = json.optString("oauthRefreshToken", ""),
+                oauthTokenExpiry = json.optLong("oauthTokenExpiry", 0)
+            )
+        }
     }
 }

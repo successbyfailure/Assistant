@@ -416,7 +416,18 @@ object McpServerFactory {
                 "local_filesystem" -> servers.add(FileSystemMcpServer(context, config.serverName))
                 "local_calendar" -> servers.add(CalendarMcpServer(context, config.serverName))
                 "local_notes" -> servers.add(NotesMcpServer(context, config.serverName))
-                "remote_http" -> servers.add(RemoteMcpServer(config))
+                "remote_http" -> {
+                    val onConfigUpdate: (McpServerConfig) -> Unit = { updatedConfig ->
+                        // Persist updated OAuth tokens
+                        val allConfigs = settings.getMcpServers().toMutableList()
+                        val index = allConfigs.indexOfFirst { it.id == updatedConfig.id }
+                        if (index >= 0) {
+                            allConfigs[index] = updatedConfig
+                            settings.saveMcpServers(allConfigs)
+                        }
+                    }
+                    servers.add(RemoteMcpServer(config, onConfigUpdate))
+                }
                 else -> Log.w(TAG, "MCP type not supported: ${config.type} (${config.name})")
             }
         }
@@ -426,10 +437,17 @@ object McpServerFactory {
     private const val TAG = "McpServerFactory"
 }
 
-class RemoteMcpServer(private val config: McpServerConfig) : McpServer {
+class RemoteMcpServer(
+    private var config: McpServerConfig,
+    private val onConfigUpdate: ((McpServerConfig) -> Unit)? = null
+) : McpServer {
     override val name: String = config.serverName
     private val client = HttpClientProvider.default
     private val tag = "RemoteMcpServer"
+
+    @Volatile
+    private var cachedAccessToken: String? = null
+    private var tokenExpiry: Long = 0
 
     override fun listTools(): List<McpTool> {
         val rpcResult = callJsonRpc("tools/list", JSONObject())
@@ -536,9 +554,120 @@ class RemoteMcpServer(private val config: McpServerConfig) : McpServer {
     }
 
     private fun Request.Builder.applyAuth(): Request.Builder {
-        if (config.apiKey.isNotBlank()) {
-            header("Authorization", "Bearer ${config.apiKey}")
+        when (config.authType) {
+            McpAuthType.NONE -> {
+                // No authentication
+            }
+            McpAuthType.BEARER -> {
+                if (config.apiKey.isNotBlank()) {
+                    header("Authorization", "Bearer ${config.apiKey}")
+                }
+            }
+            McpAuthType.CUSTOM_HEADERS -> {
+                config.customHeaders.forEach { (key, value) ->
+                    header(key, value)
+                }
+            }
+            McpAuthType.OAUTH -> {
+                val token = getOAuthAccessToken()
+                if (token != null) {
+                    header("Authorization", "Bearer $token")
+                }
+            }
         }
         return this
+    }
+
+    private fun getOAuthAccessToken(): String? {
+        // Check if we have a valid cached token
+        if (cachedAccessToken != null && System.currentTimeMillis() < tokenExpiry - 60_000) {
+            return cachedAccessToken
+        }
+
+        // Check if stored token is still valid
+        if (config.oauthAccessToken.isNotBlank() && System.currentTimeMillis() < config.oauthTokenExpiry - 60_000) {
+            cachedAccessToken = config.oauthAccessToken
+            tokenExpiry = config.oauthTokenExpiry
+            return cachedAccessToken
+        }
+
+        // Try to refresh token
+        if (config.oauthRefreshToken.isNotBlank()) {
+            return refreshOAuthToken()
+        }
+
+        // Get new token with client credentials
+        return fetchNewOAuthToken()
+    }
+
+    private fun refreshOAuthToken(): String? {
+        if (config.oauthTokenUrl.isBlank()) return null
+
+        val formBody = okhttp3.FormBody.Builder()
+            .add("grant_type", "refresh_token")
+            .add("refresh_token", config.oauthRefreshToken)
+            .add("client_id", config.oauthClientId)
+            .add("client_secret", config.oauthClientSecret)
+            .build()
+
+        return executeOAuthRequest(formBody)
+    }
+
+    private fun fetchNewOAuthToken(): String? {
+        if (config.oauthTokenUrl.isBlank() || config.oauthClientId.isBlank()) return null
+
+        val formBody = okhttp3.FormBody.Builder()
+            .add("grant_type", "client_credentials")
+            .add("client_id", config.oauthClientId)
+            .add("client_secret", config.oauthClientSecret)
+            .apply {
+                if (config.oauthScope.isNotBlank()) {
+                    add("scope", config.oauthScope)
+                }
+            }
+            .build()
+
+        return executeOAuthRequest(formBody)
+    }
+
+    private fun executeOAuthRequest(formBody: okhttp3.FormBody): String? {
+        val request = Request.Builder()
+            .url(config.oauthTokenUrl)
+            .post(formBody)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .build()
+
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.e(tag, "OAuth token request failed: ${response.code}")
+                    return null
+                }
+                val body = response.body?.string().orEmpty()
+                val json = JSONObject(body)
+                val accessToken = json.optString("access_token")
+                val expiresIn = json.optLong("expires_in", 3600)
+                val refreshToken = json.optString("refresh_token", config.oauthRefreshToken)
+
+                if (accessToken.isBlank()) return null
+
+                cachedAccessToken = accessToken
+                tokenExpiry = System.currentTimeMillis() + (expiresIn * 1000)
+
+                // Update config with new tokens
+                val updatedConfig = config.copy(
+                    oauthAccessToken = accessToken,
+                    oauthRefreshToken = refreshToken,
+                    oauthTokenExpiry = tokenExpiry
+                )
+                config = updatedConfig
+                onConfigUpdate?.invoke(updatedConfig)
+
+                accessToken
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "OAuth token request error", e)
+            null
+        }
     }
 }

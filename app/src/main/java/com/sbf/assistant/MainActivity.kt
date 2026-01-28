@@ -1509,37 +1509,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAddMcpDialog() {
-        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_endpoint, null)
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_mcp, null)
         val etName = dialogView.findViewById<EditText>(R.id.et_name)
         val etUrl = dialogView.findViewById<EditText>(R.id.et_url)
-        val etKey = dialogView.findViewById<EditText>(R.id.et_key)
-        val tilKey = dialogView.findViewById<TextInputLayout>(R.id.til_key)
-        val spinnerType = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_type)
-        val tilUrl = dialogView.findViewById<TextInputLayout>(R.id.til_url)
-        val btnScan = dialogView.findViewById<MaterialButton>(R.id.btn_scan)
-        val tvHelpLink = dialogView.findViewById<TextView>(R.id.tv_help_link)
+        val spinnerAuthType = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_auth_type)
+        val layoutBearer = dialogView.findViewById<View>(R.id.layout_bearer)
+        val etApiKey = dialogView.findViewById<EditText>(R.id.et_api_key)
+        val layoutCustomHeaders = dialogView.findViewById<View>(R.id.layout_custom_headers)
+        val etCustomHeaders = dialogView.findViewById<EditText>(R.id.et_custom_headers)
+        val layoutOAuth = dialogView.findViewById<View>(R.id.layout_oauth)
+        val etOAuthTokenUrl = dialogView.findViewById<EditText>(R.id.et_oauth_token_url)
+        val etOAuthClientId = dialogView.findViewById<EditText>(R.id.et_oauth_client_id)
+        val etOAuthClientSecret = dialogView.findViewById<EditText>(R.id.et_oauth_client_secret)
+        val etOAuthScope = dialogView.findViewById<EditText>(R.id.et_oauth_scope)
 
-        tilKey.visibility = View.VISIBLE
-        btnScan.visibility = View.GONE
-        tvHelpLink.visibility = View.GONE
-        tilUrl.visibility = View.VISIBLE
+        val authTypes = listOf("None", "Bearer Token", "Custom Headers", "OAuth 2.0")
+        val authTypeValues = listOf(McpAuthType.NONE, McpAuthType.BEARER, McpAuthType.CUSTOM_HEADERS, McpAuthType.OAUTH)
+        spinnerAuthType.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, authTypes))
+        spinnerAuthType.setText("Bearer Token", false)
 
-        val types = listOf("Remote MCP")
-        spinnerType.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, types))
-        spinnerType.setText("Remote MCP", false)
-        spinnerType.isEnabled = false
+        fun updateAuthVisibility(authType: McpAuthType) {
+            layoutBearer.visibility = if (authType == McpAuthType.BEARER) View.VISIBLE else View.GONE
+            layoutCustomHeaders.visibility = if (authType == McpAuthType.CUSTOM_HEADERS) View.VISIBLE else View.GONE
+            layoutOAuth.visibility = if (authType == McpAuthType.OAUTH) View.VISIBLE else View.GONE
+        }
+
+        spinnerAuthType.setOnItemClickListener { _, _, position, _ ->
+            updateAuthVisibility(authTypeValues[position])
+        }
 
         AlertDialog.Builder(this)
-            .setTitle("Agregar MCP")
+            .setTitle("Add MCP Server")
             .setView(dialogView)
-            .setPositiveButton("Agregar") { _, _ ->
+            .setPositiveButton("Add") { _, _ ->
                 val name = etName.text.toString().trim()
                 val url = etUrl.text.toString().trim()
-                val key = etKey.text.toString().trim()
                 if (name.isBlank() || url.isBlank()) {
-                    Toast.makeText(this, "Nombre y URL son obligatorios", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Name and URL are required", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
+
+                val selectedAuthIndex = authTypes.indexOf(spinnerAuthType.text.toString())
+                val authType = if (selectedAuthIndex >= 0) authTypeValues[selectedAuthIndex] else McpAuthType.BEARER
+
+                val customHeaders = if (authType == McpAuthType.CUSTOM_HEADERS) {
+                    parseCustomHeaders(etCustomHeaders.text.toString())
+                } else emptyMap()
+
                 val servers = settingsManager.getMcpServers().toMutableList()
                 servers.add(
                     McpServerConfig(
@@ -1549,14 +1565,38 @@ class MainActivity : AppCompatActivity() {
                         type = "remote_http",
                         serverName = name.trim().lowercase().replace(" ", "_"),
                         enabled = true,
-                        apiKey = key
+                        apiKey = etApiKey.text.toString().trim(),
+                        authType = authType,
+                        customHeaders = customHeaders,
+                        oauthTokenUrl = etOAuthTokenUrl.text.toString().trim(),
+                        oauthClientId = etOAuthClientId.text.toString().trim(),
+                        oauthClientSecret = etOAuthClientSecret.text.toString().trim(),
+                        oauthScope = etOAuthScope.text.toString().trim()
                     )
                 )
                 settingsManager.saveMcpServers(servers)
                 renderMcpList()
             }
-            .setNegativeButton("Cancelar", null)
+            .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun parseCustomHeaders(text: String): Map<String, String> {
+        val headers = mutableMapOf<String, String>()
+        text.lines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isNotBlank()) {
+                val colonIndex = trimmed.indexOf(':')
+                if (colonIndex > 0) {
+                    val key = trimmed.substring(0, colonIndex).trim()
+                    val value = trimmed.substring(colonIndex + 1).trim()
+                    if (key.isNotBlank()) {
+                        headers[key] = value
+                    }
+                }
+            }
+        }
+        return headers
     }
 
     private fun startHealthCheck() {
