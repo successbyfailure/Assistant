@@ -240,12 +240,32 @@ class SettingsManager(context: Context) {
         set(value) = prefs.edit().putString("agent_system_prompt", value).apply()
 
     var agentUserPromptPrefix: String
-        get() = prefs.getString("agent_user_prompt_prefix", "") ?: ""
+        get() = prefs.getString("agent_user_prompt_prefix", "\$now - source: \$source") ?: "\$now - source: \$source"
         set(value) = prefs.edit().putString("agent_user_prompt_prefix", value).apply()
+
+    var agentUserPromptPrefixVarsEnabled: Boolean
+        get() = prefs.getBoolean("agent_user_prompt_prefix_vars", true)
+        set(value) = prefs.edit().putBoolean("agent_user_prompt_prefix_vars", value).apply()
 
     var ttsAutoReadEnabled: Boolean
         get() = prefs.getBoolean("tts_auto_read_enabled", true)
         set(value) = prefs.edit().putBoolean("tts_auto_read_enabled", value).apply()
+
+    var ttsChunkOnPunctuation: Boolean
+        get() = prefs.getBoolean("tts_chunk_on_punctuation", false)
+        set(value) = prefs.edit().putBoolean("tts_chunk_on_punctuation", value).apply()
+
+    var ttsChunkSeparators: String
+        get() = prefs.getString("tts_chunk_separators", ".,/;:!?") ?: ".,/;:!?"
+        set(value) = prefs.edit().putString("tts_chunk_separators", value).apply()
+
+    var ttsChunkMaxLength: Int
+        get() = prefs.getInt("tts_chunk_max_length", 280)
+        set(value) = prefs.edit().putInt("tts_chunk_max_length", value).apply()
+
+    var ttsStreamOnTokens: Boolean
+        get() = prefs.getBoolean("tts_stream_on_tokens", false)
+        set(value) = prefs.edit().putBoolean("tts_stream_on_tokens", value).apply()
 
     var themeMode: String
         get() = prefs.getString("theme_mode", ThemeManager.MODE_SYSTEM) ?: ThemeManager.MODE_SYSTEM

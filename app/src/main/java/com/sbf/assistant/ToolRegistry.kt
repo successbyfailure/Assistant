@@ -1,5 +1,6 @@
 package com.sbf.assistant
 
+import android.util.Log
 import org.json.JSONObject
 
 class ToolRegistry(
@@ -7,6 +8,7 @@ class ToolRegistry(
     private val mcpClient: McpClient?
 ) {
     fun getTools(): List<ToolDefinition> {
+        Log.d(TAG, "getTools() called, toolsEnabled=${settings.toolsEnabled}, mcpEnabled=${settings.mcpEnabled}, mcpClient=${mcpClient != null}")
         if (!settings.toolsEnabled) return emptyList()
         val tools = mutableListOf<ToolDefinition>()
         if (settings.toolAllowSms) {
@@ -94,10 +96,19 @@ class ToolRegistry(
         }
 
         if (settings.mcpEnabled) {
+            Log.d(TAG, "MCP enabled, fetching MCP tools...")
             val mcpTools = mcpClient?.listToolDefinitions().orEmpty()
+            Log.d(TAG, "MCP returned ${mcpTools.size} tools")
             tools.addAll(mcpTools)
+        } else {
+            Log.d(TAG, "MCP disabled, skipping MCP tools")
         }
+        Log.d(TAG, "getTools() returning ${tools.size} total tools")
         return tools
+    }
+
+    companion object {
+        private const val TAG = "ToolRegistry"
     }
 
     private fun basicTool(

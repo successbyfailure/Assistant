@@ -104,7 +104,9 @@ data class McpServerConfig(
     val oauthScope: String = "",
     val oauthAccessToken: String = "",
     val oauthRefreshToken: String = "",
-    val oauthTokenExpiry: Long = 0
+    val oauthTokenExpiry: Long = 0,
+    // Disabled tools (all enabled by default)
+    val disabledTools: Set<String> = emptySet()
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -124,6 +126,7 @@ data class McpServerConfig(
         put("oauthAccessToken", oauthAccessToken)
         put("oauthRefreshToken", oauthRefreshToken)
         put("oauthTokenExpiry", oauthTokenExpiry)
+        put("disabledTools", org.json.JSONArray(disabledTools.toList()))
     }
 
     companion object {
@@ -132,6 +135,14 @@ data class McpServerConfig(
             val headers = mutableMapOf<String, String>()
             headersJson?.keys()?.forEach { key ->
                 headers[key] = headersJson.optString(key, "")
+            }
+
+            val disabledToolsJson = json.optJSONArray("disabledTools")
+            val disabledTools = mutableSetOf<String>()
+            if (disabledToolsJson != null) {
+                for (i in 0 until disabledToolsJson.length()) {
+                    disabledTools.add(disabledToolsJson.optString(i, ""))
+                }
             }
 
             return McpServerConfig(
@@ -151,7 +162,8 @@ data class McpServerConfig(
                 oauthScope = json.optString("oauthScope", ""),
                 oauthAccessToken = json.optString("oauthAccessToken", ""),
                 oauthRefreshToken = json.optString("oauthRefreshToken", ""),
-                oauthTokenExpiry = json.optLong("oauthTokenExpiry", 0)
+                oauthTokenExpiry = json.optLong("oauthTokenExpiry", 0),
+                disabledTools = disabledTools
             )
         }
     }

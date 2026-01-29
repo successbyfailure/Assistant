@@ -219,8 +219,21 @@ class OpenAiClient(private val endpoint: Endpoint) {
 
         val toolBuilders = mutableMapOf<Int, ToolCallBuilder>()
         val eventSourceListener = object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                Log.d(TAG, "Stream opened: ${response.code}")
+            }
+
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                Log.d(TAG, "Stream event: data.length=${data.length}")
                 if (data == "[DONE]") {
+                    Log.d(TAG, "Stream complete: [DONE] received")
+                    if (toolBuilders.isNotEmpty()) {
+                        val built = toolBuilders.toSortedMap().values.mapNotNull { it.build() }
+                        Log.d(TAG, "Tool calls detected at DONE: ${built.size}")
+                        if (built.isNotEmpty()) {
+                            callback.onToolCalls(built)
+                        }
+                    }
                     toolBuilders.clear()
                     callback.onComplete()
                     return
@@ -230,9 +243,11 @@ class OpenAiClient(private val endpoint: Endpoint) {
                     val choices = jsonResponse.getJSONArray("choices")
                     if (choices.length() > 0) {
                         val choice = choices.getJSONObject(0)
-                        val delta = choice.getJSONObject("delta")
+                        val delta = choice.optJSONObject("delta") ?: JSONObject()
+                        var emitted = false
                         if (delta.has("content")) {
                             callback.onToken(delta.getString("content"))
+                            emitted = true
                         }
                         if (delta.has("tool_calls")) {
                             val toolCalls = delta.getJSONArray("tool_calls")
@@ -256,11 +271,48 @@ class OpenAiClient(private val endpoint: Endpoint) {
                                     }
                                 }
                             }
+                            emitted = true
+                        }
+                        // Some providers send non-streaming chunks with "message" instead of "delta"
+                        val message = choice.optJSONObject("message")
+                        if (message != null) {
+                            if (!delta.has("content") && message.has("content")) {
+                                callback.onToken(message.getString("content"))
+                                emitted = true
+                            }
+                            if (!delta.has("tool_calls") && message.has("tool_calls")) {
+                                val toolCalls = message.getJSONArray("tool_calls")
+                                for (i in 0 until toolCalls.length()) {
+                                    val toolCall = toolCalls.getJSONObject(i)
+                                    val index = toolCall.optInt("index", i)
+                                    val builder = toolBuilders.getOrPut(index) { ToolCallBuilder() }
+                                    val idValue = toolCall.optString("id")
+                                    if (idValue.isNotBlank()) {
+                                        builder.id = idValue
+                                    }
+                                    val function = toolCall.optJSONObject("function")
+                                    if (function != null) {
+                                        val nameValue = function.optString("name")
+                                        if (nameValue.isNotBlank()) {
+                                            builder.name = nameValue
+                                        }
+                                        val argumentsValue = function.optString("arguments")
+                                        if (argumentsValue.isNotBlank()) {
+                                            builder.arguments.append(argumentsValue)
+                                        }
+                                    }
+                                }
+                                emitted = true
+                            }
+                        }
+                        if (!emitted) {
+                            Log.d(TAG, "Unparsed choice payload: ${choice.toString().take(500)}")
+                            Log.d(TAG, "Unparsed SSE data: ${data.take(500)}")
                         }
                         val finishReason = choice.optString("finish_reason")
-                        if (finishReason == "tool_calls") {
+                        if (finishReason.isNotBlank() && toolBuilders.isNotEmpty()) {
                             val built = toolBuilders.toSortedMap().values.mapNotNull { it.build() }
-                            Log.d(TAG, "Tool calls detected: ${built.size}")
+                            Log.d(TAG, "Tool calls detected (finish_reason=$finishReason): ${built.size}")
                             if (built.isNotEmpty()) {
                                 callback.onToolCalls(built)
                             }
@@ -272,7 +324,12 @@ class OpenAiClient(private val endpoint: Endpoint) {
                 }
             }
 
+            override fun onClosed(eventSource: EventSource) {
+                Log.d(TAG, "Stream closed")
+            }
+
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                Log.e(TAG, "Stream failure: t=${t?.message} response=${response?.code}")
                 toolBuilders.clear()
                 val error = if (response != null && !response.isSuccessful) {
                     val errorBody = response.body?.string()?.take(2000).orEmpty()
@@ -291,6 +348,7 @@ class OpenAiClient(private val endpoint: Endpoint) {
             }
         }
 
+        Log.d(TAG, "Starting EventSource to $url")
         return EventSources.createFactory(client).newEventSource(requestBuilder.build(), eventSourceListener)
     }
 

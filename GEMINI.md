@@ -28,6 +28,11 @@ Assistant es un asistente de voz y texto altamente configurable para Android, di
 | **LlmTokenizer básico** | No implementa SentencePiece BPE/Unigram | Usar MediaPipe .task o GeminiNano |
 | **Whisper GPU inestable** | Algunos dispositivos fallan con GPU delegate | Fallback automático a CPU |
 | **Modelos multimodales** | SmolVLM requiere tokenizer especial | No soportado aún |
+| **Tools/MCP por proveedor** | El envío de tools (incluyendo MCP) solo se habilita para endpoints soportados por `supportsTools()`; en otros tipos el LLM no recibe tools aunque MCP liste correctamente | Usar un endpoint tipo OpenAI/Generic/LocalAI/Ollama; o ampliar `supportsTools()` |
+| **TTS streaming inestable** | En modo TTS por streaming (chunks), la reproducción y señalización pueden cortarse o quedar desincronizadas | Revisar cola de TTS y estado en `TtsController`/`ChatActivity` |
+
+**Nota importante sobre MCP y proveedores**
+El cliente solo adjunta tools al request si el tipo de endpoint soporta function-calling. Actualmente se habilita para: `openai`, `generic`, `localai`, `ollama_cloud`, `ollama_self-hosted`, `ollama_self_hosted`. Para otros proveedores (p. ej. Groq/Together/Mistral si no se marcan como compatibles) el modelo no verá tools aunque MCP las liste. Si agregas un nuevo proveedor con function-calling, actualiza `OpenAiClient.supportsTools()`.
 
 ---
 

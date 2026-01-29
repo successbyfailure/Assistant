@@ -13,12 +13,14 @@ import org.json.JSONObject
 
 class EndpointAdapter(
     private var endpoints: List<Endpoint>,
-    private val onDelete: (Endpoint) -> Unit
+    private val onDelete: (Endpoint) -> Unit,
+    private val onEdit: (Endpoint) -> Unit
 ) : RecyclerView.Adapter<EndpointAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val tvName: TextView = view.findViewById(R.id.tv_name)
         val tvUrl: TextView = view.findViewById(R.id.tv_url)
+        val btnEdit: MaterialButton = view.findViewById(R.id.btn_edit)
         val btnDelete: MaterialButton = view.findViewById(R.id.btn_delete)
         val statusIndicator: View = view.findViewById(R.id.view_status_indicator)
         val tvLatency: TextView = view.findViewById(R.id.tv_latency)
@@ -34,6 +36,7 @@ class EndpointAdapter(
         holder.tvName.text = endpoint.name
         holder.tvUrl.text = endpoint.baseUrl
         holder.btnDelete.setOnClickListener { onDelete(endpoint) }
+        holder.btnEdit.setOnClickListener { onEdit(endpoint) }
 
         // Load health status
         val prefs = holder.itemView.context.getSharedPreferences("health_check", Context.MODE_PRIVATE)

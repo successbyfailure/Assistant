@@ -37,15 +37,28 @@ interface McpServer {
 
 class McpClient(private val servers: List<McpServer>) {
     fun listToolDefinitions(): List<ToolDefinition> {
-        return servers.flatMap { server ->
-            server.listTools().map { tool ->
-                ToolDefinition(
-                    name = McpToolAdapter.composeToolName(server.name, tool.name),
-                    description = tool.description,
-                    parameters = tool.inputSchema
-                )
+        Log.d(TAG, "listToolDefinitions() called with ${servers.size} servers")
+        val allTools = mutableListOf<ToolDefinition>()
+        for (server in servers) {
+            Log.d(TAG, "Fetching tools from server: ${server.name}")
+            try {
+                val tools = server.listTools()
+                Log.d(TAG, "Server ${server.name} returned ${tools.size} tools")
+                tools.forEach { tool ->
+                    allTools.add(
+                        ToolDefinition(
+                            name = McpToolAdapter.composeToolName(server.name, tool.name),
+                            description = tool.description,
+                            parameters = tool.inputSchema
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching tools from ${server.name}", e)
             }
         }
+        Log.d(TAG, "listToolDefinitions() returning ${allTools.size} total tools")
+        return allTools
     }
 
     fun callTool(serverName: String, toolName: String, args: JSONObject): McpToolResult {
@@ -407,15 +420,39 @@ class NotesMcpServer(
     }
 }
 
+/**
+ * Wrapper that filters out disabled tools from an MCP server
+ */
+class FilteredMcpServer(
+    private val delegate: McpServer,
+    private val disabledTools: Set<String>
+) : McpServer {
+    override val name: String = delegate.name
+
+    override fun listTools(): List<McpTool> {
+        return delegate.listTools().filter { it.name !in disabledTools }
+    }
+
+    override fun callTool(name: String, arguments: JSONObject): McpToolResult {
+        if (name in disabledTools) {
+            return McpToolResult("Tool '$name' is disabled", isError = true)
+        }
+        return delegate.callTool(name, arguments)
+    }
+}
+
 object McpServerFactory {
     fun createClient(context: Context, settings: SettingsManager): McpClient {
         val servers = mutableListOf<McpServer>()
         val configs = settings.getMcpServers()
+        Log.d(TAG, "createClient: ${configs.size} MCP configs found, ${configs.count { it.enabled }} enabled")
+
         configs.filter { it.enabled }.forEach { config ->
-            when (config.type) {
-                "local_filesystem" -> servers.add(FileSystemMcpServer(context, config.serverName))
-                "local_calendar" -> servers.add(CalendarMcpServer(context, config.serverName))
-                "local_notes" -> servers.add(NotesMcpServer(context, config.serverName))
+            Log.d(TAG, "Loading MCP: ${config.name} type=${config.type} url=${config.baseUrl} authType=${config.authType}")
+            val baseServer: McpServer? = when (config.type) {
+                "local_filesystem" -> FileSystemMcpServer(context, config.serverName)
+                "local_calendar" -> CalendarMcpServer(context, config.serverName)
+                "local_notes" -> NotesMcpServer(context, config.serverName)
                 "remote_http" -> {
                     val onConfigUpdate: (McpServerConfig) -> Unit = { updatedConfig ->
                         // Persist updated OAuth tokens
@@ -426,11 +463,27 @@ object McpServerFactory {
                             settings.saveMcpServers(allConfigs)
                         }
                     }
-                    servers.add(RemoteMcpServer(config, onConfigUpdate))
+                    Log.d(TAG, "Added remote MCP: ${config.name}")
+                    RemoteMcpServer(config, onConfigUpdate)
                 }
-                else -> Log.w(TAG, "MCP type not supported: ${config.type} (${config.name})")
+                else -> {
+                    Log.w(TAG, "MCP type not supported: ${config.type} (${config.name})")
+                    null
+                }
+            }
+
+            if (baseServer != null) {
+                // Wrap with filtering if there are disabled tools
+                val server = if (config.disabledTools.isNotEmpty()) {
+                    Log.d(TAG, "MCP ${config.name}: ${config.disabledTools.size} tools disabled")
+                    FilteredMcpServer(baseServer, config.disabledTools)
+                } else {
+                    baseServer
+                }
+                servers.add(server)
             }
         }
+        Log.d(TAG, "McpClient created with ${servers.size} servers")
         return McpClient(servers)
     }
 
@@ -445,45 +498,195 @@ class RemoteMcpServer(
     private val client = HttpClientProvider.default
     private val tag = "RemoteMcpServer"
 
+    // Executor for network operations to avoid NetworkOnMainThreadException
+    private val networkExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     @Volatile
     private var cachedAccessToken: String? = null
     private var tokenExpiry: Long = 0
 
-    override fun listTools(): List<McpTool> {
-        val rpcResult = callJsonRpc("tools/list", JSONObject())
-        if (rpcResult != null) {
-            val tools = rpcResult.optJSONArray("tools") ?: JSONArray()
-            return parseTools(tools)
+    // MCP Streamable HTTP session management
+    @Volatile
+    private var mcpSessionId: String? = null
+    private var requestId = 1
+
+    /**
+     * Run a network operation on a background thread and return the result.
+     * This avoids NetworkOnMainThreadException.
+     */
+    private fun <T> runOnNetwork(operation: () -> T): T {
+        return try {
+            networkExecutor.submit(operation).get(30, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.ExecutionException) {
+            throw e.cause ?: e
         }
-        val httpUrl = "${config.baseUrl.trimEnd('/')}/tools"
-        val request = Request.Builder().url(httpUrl).get().applyAuth().build()
+    }
+
+    /**
+     * Initialize MCP session for Streamable HTTP transport.
+     * Returns the session ID if successful, null otherwise.
+     */
+    private fun initializeSession(): String? {
+        if (mcpSessionId != null) return mcpSessionId
+
+        Log.d(tag, "Initializing MCP session for ${config.name}")
+        val payload = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("id", requestId++)
+            put("method", "initialize")
+            put("params", JSONObject().apply {
+                put("protocolVersion", "2024-11-05")
+                put("clientInfo", JSONObject().apply {
+                    put("name", "AndroidAssistant")
+                    put("version", "1.0")
+                })
+                put("capabilities", JSONObject())
+            })
+        }
+
+        val request = Request.Builder()
+            .url(config.baseUrl)
+            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+            .header("Accept", "application/json, text/event-stream")
+            .applyAuth()
+            .build()
+
         return try {
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return emptyList()
-                }
                 val body = response.body?.string().orEmpty()
-                val json = JSONObject(body)
-                val tools = json.optJSONArray("tools") ?: JSONArray()
-                parseTools(tools)
+                Log.d(tag, "MCP initialize response: code=${response.code}")
+
+                if (!response.isSuccessful) {
+                    Log.w(tag, "MCP initialize failed: ${response.code} - ${body.take(200)}")
+                    return null
+                }
+
+                // Get session ID from header
+                val sessionId = response.header("Mcp-Session-Id")
+                if (sessionId != null) {
+                    Log.d(tag, "MCP session established: $sessionId")
+                    mcpSessionId = sessionId
+
+                    // Send initialized notification
+                    sendNotification("notifications/initialized", JSONObject())
+                }
+
+                sessionId
             }
+        } catch (e: Exception) {
+            Log.e(tag, "MCP initialize error", e)
+            null
+        }
+    }
+
+    private fun sendNotification(method: String, params: JSONObject) {
+        val payload = JSONObject().apply {
+            put("jsonrpc", "2.0")
+            put("method", method)
+            put("params", params)
+        }
+
+        val requestBuilder = Request.Builder()
+            .url(config.baseUrl)
+            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+            .header("Accept", "application/json, text/event-stream")
+            .applyAuth()
+
+        mcpSessionId?.let { requestBuilder.header("Mcp-Session-Id", it) }
+
+        try {
+            client.newCall(requestBuilder.build()).execute().close()
+        } catch (e: Exception) {
+            Log.w(tag, "MCP notification failed: ${e.message}")
+        }
+    }
+
+    override fun listTools(): List<McpTool> {
+        Log.d(tag, "listTools() called for server: ${config.name} (${config.serverName}) url=${config.baseUrl} authType=${config.authType}")
+
+        return try {
+            runOnNetwork { listToolsInternal() }
         } catch (e: Exception) {
             Log.e(tag, "Remote MCP listTools failed: ${config.baseUrl}", e)
             emptyList()
         }
     }
 
+    private fun listToolsInternal(): List<McpTool> {
+        // Try with session initialization for Streamable HTTP servers
+        val sessionId = initializeSession()
+        val rpcResult = callJsonRpc("tools/list", JSONObject(), sessionId)
+        if (rpcResult != null) {
+            val tools = rpcResult.optJSONArray("tools") ?: JSONArray()
+            Log.d(tag, "JSON-RPC tools/list returned ${tools.length()} tools for ${config.name}")
+            return parseTools(tools)
+        }
+
+        // If session-based call failed, try without session (for simple HTTP servers)
+        if (sessionId == null) {
+            val directResult = callJsonRpc("tools/list", JSONObject(), null)
+            if (directResult != null) {
+                val tools = directResult.optJSONArray("tools") ?: JSONArray()
+                Log.d(tag, "Direct JSON-RPC tools/list returned ${tools.length()} tools for ${config.name}")
+                return parseTools(tools)
+            }
+        }
+
+        Log.d(tag, "JSON-RPC failed for ${config.name}, trying REST fallback")
+
+        val httpUrl = "${config.baseUrl.trimEnd('/')}/tools"
+        val request = Request.Builder().url(httpUrl).get().applyAuth().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                Log.d(tag, "REST /tools response: code=${response.code} body=${body.take(500)}")
+                if (!response.isSuccessful) {
+                    Log.w(tag, "REST /tools failed for ${config.name}: ${response.code}")
+                    return emptyList()
+                }
+                val json = JSONObject(body)
+                val tools = json.optJSONArray("tools") ?: JSONArray()
+                Log.d(tag, "REST returned ${tools.length()} tools for ${config.name}")
+                parseTools(tools)
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Remote MCP listTools REST fallback failed: ${config.baseUrl}", e)
+            emptyList()
+        }
+    }
+
     override fun callTool(name: String, arguments: JSONObject): McpToolResult {
+        return try {
+            runOnNetwork { callToolInternal(name, arguments) }
+        } catch (e: Exception) {
+            Log.e(tag, "Remote MCP callTool failed: ${config.baseUrl}", e)
+            McpToolResult("Fallo de conexion MCP remoto: ${e.message}", true)
+        }
+    }
+
+    private fun callToolInternal(name: String, arguments: JSONObject): McpToolResult {
         val rpcParams = JSONObject().apply {
             put("name", name)
             put("arguments", arguments)
         }
-        val rpcResult = callJsonRpc("tools/call", rpcParams)
+
+        // Try with existing session or initialize new one
+        val sessionId = mcpSessionId ?: initializeSession()
+        val rpcResult = callJsonRpc("tools/call", rpcParams, sessionId)
         if (rpcResult != null) {
-            val content = rpcResult.optString("content", rpcResult.optString("text", ""))
-            val isError = rpcResult.optBoolean("is_error", false)
+            // Handle content array format
+            val contentArray = rpcResult.optJSONArray("content")
+            val content = if (contentArray != null && contentArray.length() > 0) {
+                val firstContent = contentArray.getJSONObject(0)
+                firstContent.optString("text", firstContent.toString())
+            } else {
+                rpcResult.optString("content", rpcResult.optString("text", ""))
+            }
+            val isError = rpcResult.optBoolean("isError", rpcResult.optBoolean("is_error", false))
             return McpToolResult(content = content, isError = isError)
         }
+
+        // REST fallback
         val httpUrl = "${config.baseUrl.trimEnd('/')}/tool"
         val json = JSONObject().apply {
             put("name", name)
@@ -507,7 +710,7 @@ class RemoteMcpServer(
                 )
             }
         } catch (e: Exception) {
-            Log.e(tag, "Remote MCP callTool failed: ${config.baseUrl}", e)
+            Log.e(tag, "Remote MCP callTool REST fallback failed: ${config.baseUrl}", e)
             McpToolResult("Fallo de conexion MCP remoto.", true)
         }
     }
@@ -527,30 +730,72 @@ class RemoteMcpServer(
         return list
     }
 
-    private fun callJsonRpc(method: String, params: JSONObject): JSONObject? {
+    private fun callJsonRpc(method: String, params: JSONObject, sessionId: String? = null): JSONObject? {
         val payload = JSONObject().apply {
             put("jsonrpc", "2.0")
-            put("id", method.replace("/", "_"))
+            put("id", requestId++)
             put("method", method)
             put("params", params)
         }
-        val request = Request.Builder()
+        Log.d(tag, "JSON-RPC request: ${config.baseUrl} method=$method sessionId=${sessionId?.take(8)}... authType=${config.authType}")
+        if (config.authType == McpAuthType.CUSTOM_HEADERS) {
+            Log.d(tag, "Custom headers: ${config.customHeaders.keys.joinToString()}")
+        }
+
+        val requestBuilder = Request.Builder()
             .url(config.baseUrl)
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
+            .header("Accept", "application/json, text/event-stream")
             .applyAuth()
-            .build()
+
+        // Add session ID header for Streamable HTTP transport
+        sessionId?.let { requestBuilder.header("Mcp-Session-Id", it) }
+
+        val request = requestBuilder.build()
         return try {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) return null
-                val json = JSONObject(body)
-                if (!json.has("result")) return null
+                Log.d(tag, "JSON-RPC response: code=${response.code} contentType=${response.header("Content-Type")}")
+                if (!response.isSuccessful) {
+                    Log.w(tag, "JSON-RPC failed: ${response.code} for ${config.name}")
+                    return null
+                }
+
+                // Parse SSE format if response is text/event-stream
+                val jsonBody = if (body.contains("event:") || body.contains("data:")) {
+                    parseSseResponse(body)
+                } else {
+                    body
+                }
+
+                Log.d(tag, "Parsed JSON body: ${jsonBody.take(300)}")
+                val json = JSONObject(jsonBody)
+                if (!json.has("result")) {
+                    Log.w(tag, "JSON-RPC response missing 'result' field for ${config.name}")
+                    return null
+                }
                 json.getJSONObject("result")
             }
         } catch (e: Exception) {
             Log.e(tag, "Remote MCP JSON-RPC failed: ${config.baseUrl}", e)
             null
         }
+    }
+
+    /**
+     * Parse Server-Sent Events (SSE) format response and extract JSON data.
+     * SSE format:
+     *   id:session-id
+     *   event:message
+     *   data:{"jsonrpc":"2.0",...}
+     */
+    private fun parseSseResponse(sseBody: String): String {
+        val dataLines = sseBody.lines()
+            .filter { it.startsWith("data:") }
+            .map { it.removePrefix("data:") }
+
+        // Concatenate all data lines (for multi-line JSON)
+        return dataLines.joinToString("")
     }
 
     private fun Request.Builder.applyAuth(): Request.Builder {

@@ -12,6 +12,7 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -33,8 +34,10 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.textfield.TextInputLayout
 import com.sbf.assistant.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -92,14 +95,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupUI() {
         setupTabs()
-        endpointAdapter = EndpointAdapter(settingsManager.getEndpoints()) { endpoint ->
-            val endpoints = settingsManager.getEndpoints().toMutableList()
-            endpoints.remove(endpoint)
-            settingsManager.saveEndpoints(endpoints)
-            modelCacheManager.clearCache(endpoint.id)
-            endpointAdapter.updateData(endpoints)
-            categoryAdapter.notifyDataSetChanged()
-        }
+        endpointAdapter = EndpointAdapter(
+            settingsManager.getEndpoints(),
+            onDelete = { endpoint ->
+                val endpoints = settingsManager.getEndpoints().toMutableList()
+                endpoints.remove(endpoint)
+                settingsManager.saveEndpoints(endpoints)
+                modelCacheManager.clearCache(endpoint.id)
+                endpointAdapter.updateData(endpoints)
+                categoryAdapter.notifyDataSetChanged()
+            },
+            onEdit = { endpoint -> showEditEndpointDialog(endpoint) }
+        )
         binding.rvEndpoints.layoutManager = LinearLayoutManager(this)
         binding.rvEndpoints.adapter = endpointAdapter
 
@@ -309,7 +316,16 @@ class MainActivity : AppCompatActivity() {
     private fun setupPromptSettings() {
         binding.etSystemPrompt.setText(settingsManager.agentSystemPrompt)
         binding.etUserPromptPrefix.setText(settingsManager.agentUserPromptPrefix)
+        binding.swUserPrefixVars.isChecked = settingsManager.agentUserPromptPrefixVarsEnabled
+        binding.tvUserPrefixHelp.visibility = if (binding.swUserPrefixVars.isChecked) View.VISIBLE else View.GONE
         binding.swVoiceShortcut.isChecked = settingsManager.voiceShortcutEnabled
+        binding.swTtsChunk.isChecked = settingsManager.ttsChunkOnPunctuation
+        binding.swTtsStream.isChecked = settingsManager.ttsStreamOnTokens
+        binding.etTtsSeparators.setText(settingsManager.ttsChunkSeparators)
+        binding.etTtsMaxLen.setText(settingsManager.ttsChunkMaxLength.toString())
+        binding.tilTtsSeparators.visibility = if (binding.swTtsChunk.isChecked) View.VISIBLE else View.GONE
+        binding.tilTtsMaxLen.visibility = if (binding.swTtsChunk.isChecked) View.VISIBLE else View.GONE
+        binding.swTtsStream.visibility = if (binding.swTtsChunk.isChecked) View.VISIBLE else View.GONE
         binding.etVoiceShortcut.setText(settingsManager.voiceShortcutPhrase)
         binding.etVoiceShortcut.isEnabled = binding.swVoiceShortcut.isChecked
 
@@ -322,6 +338,28 @@ class MainActivity : AppCompatActivity() {
         binding.swVoiceShortcut.setOnCheckedChangeListener { _, isChecked ->
             settingsManager.voiceShortcutEnabled = isChecked
             binding.etVoiceShortcut.isEnabled = isChecked
+        }
+        binding.swUserPrefixVars.setOnCheckedChangeListener { _, isChecked ->
+            settingsManager.agentUserPromptPrefixVarsEnabled = isChecked
+            binding.tvUserPrefixHelp.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+        binding.swTtsChunk.setOnCheckedChangeListener { _, isChecked ->
+            settingsManager.ttsChunkOnPunctuation = isChecked
+            binding.tilTtsSeparators.visibility = if (isChecked) View.VISIBLE else View.GONE
+            binding.tilTtsMaxLen.visibility = if (isChecked) View.VISIBLE else View.GONE
+            binding.swTtsStream.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+        binding.swTtsStream.setOnCheckedChangeListener { _, isChecked ->
+            settingsManager.ttsStreamOnTokens = isChecked
+        }
+        binding.etTtsSeparators.doAfterTextChanged { text ->
+            settingsManager.ttsChunkSeparators = text?.toString().orEmpty()
+        }
+        binding.etTtsMaxLen.doAfterTextChanged { text ->
+            val value = text?.toString()?.toIntOrNull()
+            if (value != null && value > 0) {
+                settingsManager.ttsChunkMaxLength = value
+            }
         }
         binding.etVoiceShortcut.doAfterTextChanged { text ->
             settingsManager.voiceShortcutPhrase = text?.toString().orEmpty().trim()
@@ -1438,73 +1476,81 @@ class MainActivity : AppCompatActivity() {
 
         val servers = settingsManager.getMcpServers()
         servers.forEach { server ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(8)
-            }
-            val label = TextView(this).apply {
-                val suffix = when (server.type) {
-                    "local_filesystem" -> "local"
-                    "local_calendar" -> "local (stub)"
-                    "local_notes" -> "local"
-                    else -> "remote"
-                }
-                text = if (server.baseUrl.isBlank()) "${server.name} ($suffix)"
-                       else "${server.name} (${server.baseUrl})"
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val enableToggle = MaterialSwitch(this).apply {
-                isChecked = server.enabled
-                text = "Habilitar"
-                setOnCheckedChangeListener { _, isChecked ->
-                    val updated = servers.map {
-                        if (it.id == server.id) it.copy(enabled = isChecked) else it
-                    }
-                    settingsManager.saveMcpServers(updated)
-                }
-                thumbTintList = androidx.core.content.ContextCompat.getColorStateList(
-                    context,
-                    R.color.switch_enabled_thumb
-                )
-                trackTintList = androidx.core.content.ContextCompat.getColorStateList(
-                    context,
-                    R.color.switch_enabled_track
-                )
-            }
-            val askToggle = MaterialSwitch(this).apply {
-                isChecked = server.ask
-                text = "Preguntar"
-                setOnCheckedChangeListener { _, isChecked ->
-                    val updated = servers.map {
-                        if (it.id == server.id) it.copy(ask = isChecked) else it
-                    }
-                    settingsManager.saveMcpServers(updated)
-                }
-                thumbTintList = androidx.core.content.ContextCompat.getColorStateList(
-                    context,
-                    R.color.switch_ask_thumb
-                )
-                trackTintList = androidx.core.content.ContextCompat.getColorStateList(
-                    context,
-                    R.color.switch_ask_track
-                )
-            }
-            row.addView(label)
-            row.addView(enableToggle)
-            row.addView(askToggle)
+            val itemView = LayoutInflater.from(this).inflate(R.layout.item_mcp_server, container, false)
 
-            if (!server.type.startsWith("local_")) {
-                val remove = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                    text = "Eliminar"
-                    setOnClickListener {
-                        val updated = servers.filterNot { it.id == server.id }
-                        settingsManager.saveMcpServers(updated)
-                        renderMcpList()
-                    }
-                }
-                row.addView(remove)
+            val tvName = itemView.findViewById<TextView>(R.id.tv_name)
+            val tvTypeBadge = itemView.findViewById<TextView>(R.id.tv_type_badge)
+            val tvUrl = itemView.findViewById<TextView>(R.id.tv_url)
+            val tvToolsCount = itemView.findViewById<TextView>(R.id.tv_tools_count)
+            val swEnabled = itemView.findViewById<MaterialSwitch>(R.id.sw_enabled)
+            val swAsk = itemView.findViewById<MaterialSwitch>(R.id.sw_ask)
+            val btnEdit = itemView.findViewById<ImageButton>(R.id.btn_edit)
+            val btnDelete = itemView.findViewById<ImageButton>(R.id.btn_delete)
+
+            tvName.text = server.name
+
+            // Type badge
+            val (badgeText, badgeColor) = when (server.type) {
+                "local_filesystem" -> "Local" to 0xFF4CAF50.toInt()
+                "local_calendar" -> "Calendario" to 0xFF2196F3.toInt()
+                "local_notes" -> "Notas" to 0xFF9C27B0.toInt()
+                "remote_http" -> "Remoto" to 0xFFFF9800.toInt()
+                else -> "Otro" to 0xFF666666.toInt()
             }
-            container.addView(row)
+            tvTypeBadge.text = badgeText
+            tvTypeBadge.background.setTint(badgeColor)
+
+            // URL for remote servers
+            if (server.baseUrl.isNotBlank()) {
+                tvUrl.visibility = View.VISIBLE
+                tvUrl.text = server.baseUrl
+            }
+
+            // Tools count
+            val enabledTools = server.disabledTools.size
+            if (enabledTools > 0) {
+                tvToolsCount.visibility = View.VISIBLE
+                tvToolsCount.text = "$enabledTools herramientas deshabilitadas"
+            }
+
+            // Switches
+            swEnabled.isChecked = server.enabled
+            swEnabled.setOnCheckedChangeListener { _, isChecked ->
+                val updated = servers.map {
+                    if (it.id == server.id) it.copy(enabled = isChecked) else it
+                }
+                settingsManager.saveMcpServers(updated)
+            }
+
+            swAsk.isChecked = server.ask
+            swAsk.setOnCheckedChangeListener { _, isChecked ->
+                val updated = servers.map {
+                    if (it.id == server.id) it.copy(ask = isChecked) else it
+                }
+                settingsManager.saveMcpServers(updated)
+            }
+
+            // Edit button
+            btnEdit.setOnClickListener { showEditMcpDialog(server) }
+
+            // Delete button (only for remote servers)
+            if (!server.type.startsWith("local_")) {
+                btnDelete.visibility = View.VISIBLE
+                btnDelete.setOnClickListener {
+                    AlertDialog.Builder(this)
+                        .setTitle("Eliminar MCP")
+                        .setMessage("¿Eliminar ${server.name}?")
+                        .setPositiveButton("Eliminar") { _, _ ->
+                            val updated = servers.filterNot { it.id == server.id }
+                            settingsManager.saveMcpServers(updated)
+                            renderMcpList()
+                        }
+                        .setNegativeButton("Cancelar", null)
+                        .show()
+                }
+            }
+
+            container.addView(itemView)
         }
     }
 
@@ -1597,6 +1643,221 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return headers
+    }
+
+    private fun showEditMcpDialog(server: McpServerConfig) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_mcp, null)
+
+        val etName = dialogView.findViewById<EditText>(R.id.et_name)
+        val layoutUrl = dialogView.findViewById<View>(R.id.layout_url)
+        val etUrl = dialogView.findViewById<EditText>(R.id.et_url)
+        val layoutAuthSection = dialogView.findViewById<View>(R.id.layout_auth_section)
+        val spinnerAuthType = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_auth_type)
+        val layoutBearer = dialogView.findViewById<View>(R.id.layout_bearer)
+        val etApiKey = dialogView.findViewById<EditText>(R.id.et_api_key)
+        val layoutCustomHeaders = dialogView.findViewById<View>(R.id.layout_custom_headers)
+        val etCustomHeaders = dialogView.findViewById<EditText>(R.id.et_custom_headers)
+        val layoutOAuth = dialogView.findViewById<View>(R.id.layout_oauth)
+        val etOAuthTokenUrl = dialogView.findViewById<EditText>(R.id.et_oauth_token_url)
+        val etOAuthClientId = dialogView.findViewById<EditText>(R.id.et_oauth_client_id)
+        val etOAuthClientSecret = dialogView.findViewById<EditText>(R.id.et_oauth_client_secret)
+        val etOAuthScope = dialogView.findViewById<EditText>(R.id.et_oauth_scope)
+        val pbLoadingTools = dialogView.findViewById<ProgressBar>(R.id.pb_loading_tools)
+        val btnRefreshTools = dialogView.findViewById<MaterialButton>(R.id.btn_refresh_tools)
+        val tvToolsStatus = dialogView.findViewById<TextView>(R.id.tv_tools_status)
+        val toolsContainer = dialogView.findViewById<LinearLayout>(R.id.tools_container)
+
+        // Populate current values
+        etName.setText(server.name)
+
+        // Track disabled tools (mutable copy)
+        val disabledTools = server.disabledTools.toMutableSet()
+
+        // Show URL and auth for remote servers
+        val isRemote = server.type == "remote_http"
+        if (isRemote) {
+            layoutUrl.visibility = View.VISIBLE
+            layoutAuthSection.visibility = View.VISIBLE
+            etUrl.setText(server.baseUrl)
+            etApiKey.setText(server.apiKey)
+            etCustomHeaders.setText(server.customHeaders.entries.joinToString("\n") { "${it.key}: ${it.value}" })
+            etOAuthTokenUrl.setText(server.oauthTokenUrl)
+            etOAuthClientId.setText(server.oauthClientId)
+            etOAuthClientSecret.setText(server.oauthClientSecret)
+            etOAuthScope.setText(server.oauthScope)
+
+            // Auth type dropdown
+            val authTypes = listOf("Ninguna", "Bearer / API Key", "Headers personalizados", "OAuth 2.0")
+            val authTypeValues = listOf(McpAuthType.NONE, McpAuthType.BEARER, McpAuthType.CUSTOM_HEADERS, McpAuthType.OAUTH)
+            val authAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, authTypes)
+            spinnerAuthType.setAdapter(authAdapter)
+            spinnerAuthType.setText(authTypes[authTypeValues.indexOf(server.authType)], false)
+
+            fun updateAuthVisibility(authType: McpAuthType) {
+                layoutBearer.visibility = if (authType == McpAuthType.BEARER) View.VISIBLE else View.GONE
+                layoutCustomHeaders.visibility = if (authType == McpAuthType.CUSTOM_HEADERS) View.VISIBLE else View.GONE
+                layoutOAuth.visibility = if (authType == McpAuthType.OAUTH) View.VISIBLE else View.GONE
+            }
+            updateAuthVisibility(server.authType)
+
+            spinnerAuthType.setOnItemClickListener { _, _, position, _ ->
+                updateAuthVisibility(authTypeValues[position])
+            }
+        }
+
+        // Function to render tools list
+        fun renderTools(tools: List<McpTool>) {
+            toolsContainer.removeAllViews()
+            if (tools.isEmpty()) {
+                tvToolsStatus.text = "No se encontraron herramientas"
+                tvToolsStatus.visibility = View.VISIBLE
+                return
+            }
+            tvToolsStatus.visibility = View.GONE
+
+            tools.forEach { tool ->
+                val toolRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, 8, 0, 8)
+                }
+
+                val toolSwitch = MaterialSwitch(this).apply {
+                    isChecked = !disabledTools.contains(tool.name)
+                    setOnCheckedChangeListener { _, isChecked ->
+                        if (isChecked) disabledTools.remove(tool.name)
+                        else disabledTools.add(tool.name)
+                    }
+                }
+
+                val toolInfo = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginStart = 8
+                    }
+                }
+
+                val toolName = TextView(this).apply {
+                    text = tool.name
+                    textSize = 14f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                }
+
+                val toolDesc = TextView(this).apply {
+                    text = tool.description.ifBlank { "Sin descripción" }
+                    textSize = 12f
+                    setTextColor(getColor(android.R.color.darker_gray))
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+
+                toolInfo.addView(toolName)
+                toolInfo.addView(toolDesc)
+                toolRow.addView(toolSwitch)
+                toolRow.addView(toolInfo)
+                toolsContainer.addView(toolRow)
+            }
+        }
+
+        // Function to fetch tools
+        fun fetchTools() {
+            pbLoadingTools.visibility = View.VISIBLE
+            btnRefreshTools.isEnabled = false
+            tvToolsStatus.text = "Cargando herramientas..."
+            tvToolsStatus.visibility = View.VISIBLE
+            toolsContainer.removeAllViews()
+
+            lifecycleScope.launch {
+                try {
+                    val tools = withContext(Dispatchers.IO) {
+                        // Create a temporary MCP server to fetch tools
+                        val tempConfig = if (isRemote) {
+                            val selectedAuthIndex = listOf("Ninguna", "Bearer / API Key", "Headers personalizados", "OAuth 2.0")
+                                .indexOf(spinnerAuthType.text.toString())
+                            val authType = if (selectedAuthIndex >= 0) listOf(McpAuthType.NONE, McpAuthType.BEARER, McpAuthType.CUSTOM_HEADERS, McpAuthType.OAUTH)[selectedAuthIndex] else server.authType
+
+                            server.copy(
+                                baseUrl = etUrl.text.toString().trim(),
+                                apiKey = etApiKey.text.toString().trim(),
+                                authType = authType,
+                                customHeaders = parseCustomHeaders(etCustomHeaders.text.toString()),
+                                oauthTokenUrl = etOAuthTokenUrl.text.toString().trim(),
+                                oauthClientId = etOAuthClientId.text.toString().trim(),
+                                oauthClientSecret = etOAuthClientSecret.text.toString().trim(),
+                                oauthScope = etOAuthScope.text.toString().trim()
+                            )
+                        } else server
+
+                        when (tempConfig.type) {
+                            "local_filesystem" -> FileSystemMcpServer(this@MainActivity, tempConfig.serverName).listTools()
+                            "local_calendar" -> CalendarMcpServer(this@MainActivity, tempConfig.serverName).listTools()
+                            "local_notes" -> NotesMcpServer(this@MainActivity, tempConfig.serverName).listTools()
+                            "remote_http" -> RemoteMcpServer(tempConfig).listTools()
+                            else -> emptyList()
+                        }
+                    }
+                    renderTools(tools)
+                } catch (e: Exception) {
+                    tvToolsStatus.text = "Error: ${e.message}"
+                    tvToolsStatus.visibility = View.VISIBLE
+                } finally {
+                    pbLoadingTools.visibility = View.GONE
+                    btnRefreshTools.isEnabled = true
+                }
+            }
+        }
+
+        btnRefreshTools.setOnClickListener { fetchTools() }
+
+        // Initial fetch
+        fetchTools()
+
+        AlertDialog.Builder(this)
+            .setTitle("Editar: ${server.name}")
+            .setView(dialogView)
+            .setPositiveButton("Guardar") { _, _ ->
+                val newName = etName.text.toString().trim()
+                if (newName.isBlank()) {
+                    Toast.makeText(this, "El nombre es requerido", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                val updatedServer = if (isRemote) {
+                    val selectedAuthIndex = listOf("Ninguna", "Bearer / API Key", "Headers personalizados", "OAuth 2.0")
+                        .indexOf(spinnerAuthType.text.toString())
+                    val authType = if (selectedAuthIndex >= 0) listOf(McpAuthType.NONE, McpAuthType.BEARER, McpAuthType.CUSTOM_HEADERS, McpAuthType.OAUTH)[selectedAuthIndex] else server.authType
+
+                    server.copy(
+                        name = newName,
+                        serverName = newName.trim().lowercase().replace(" ", "_"),
+                        baseUrl = etUrl.text.toString().trim(),
+                        apiKey = etApiKey.text.toString().trim(),
+                        authType = authType,
+                        customHeaders = parseCustomHeaders(etCustomHeaders.text.toString()),
+                        oauthTokenUrl = etOAuthTokenUrl.text.toString().trim(),
+                        oauthClientId = etOAuthClientId.text.toString().trim(),
+                        oauthClientSecret = etOAuthClientSecret.text.toString().trim(),
+                        oauthScope = etOAuthScope.text.toString().trim(),
+                        disabledTools = disabledTools
+                    )
+                } else {
+                    server.copy(
+                        name = newName,
+                        serverName = newName.trim().lowercase().replace(" ", "_"),
+                        disabledTools = disabledTools
+                    )
+                }
+
+                val servers = settingsManager.getMcpServers().toMutableList()
+                val index = servers.indexOfFirst { it.id == server.id }
+                if (index >= 0) {
+                    servers[index] = updatedServer
+                    settingsManager.saveMcpServers(servers)
+                    renderMcpList()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun startHealthCheck() {
@@ -1706,36 +1967,14 @@ class MainActivity : AppCompatActivity() {
         spinnerType.setAdapter(adapter)
 
         spinnerType.setOnItemClickListener { _, _, position, _ ->
-            val selectedType = types[position]
-            when (selectedType) {
-                "OpenAI" -> {
-                    etUrl.setText("https://api.openai.com/v1")
-                    tilUrl.visibility = View.VISIBLE
-                    btnScan.visibility = View.GONE
-                    tvHelpLink.visibility = View.GONE
-                }
-                "Ollama Cloud" -> {
-                    etUrl.setText("https://api.ollama.com/v1")
-                    tilUrl.visibility = View.GONE
-                    btnScan.visibility = View.GONE
-                    tvHelpLink.visibility = View.VISIBLE
-                    tvHelpLink.setOnClickListener {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://ollama.com/signup"))
-                        startActivity(intent)
-                    }
-                }
-                "Ollama Self-Hosted" -> {
-                    etUrl.setText("http://")
-                    tilUrl.visibility = View.VISIBLE
-                    btnScan.visibility = View.VISIBLE
-                    tvHelpLink.visibility = View.GONE
-                }
-                else -> {
-                    tilUrl.visibility = View.VISIBLE
-                    btnScan.visibility = View.GONE
-                    tvHelpLink.visibility = View.GONE
-                }
-            }
+            applyEndpointTypeUi(
+                selectedType = types[position],
+                etUrl = etUrl,
+                tilUrl = tilUrl,
+                btnScan = btnScan,
+                tvHelpLink = tvHelpLink,
+                setDefaults = true
+            )
         }
 
         btnScan.setOnClickListener {
@@ -1769,7 +2008,7 @@ class MainActivity : AppCompatActivity() {
                 val name = etName.text.toString()
                 val url = etUrl.text.toString()
                 val key = etKey.text.toString()
-                val type = spinnerType.text.toString().lowercase().replace(" ", "_")
+                val type = endpointTypeInternal(spinnerType.text.toString())
                 
                 if (name.isNotBlank() && url.isNotBlank()) {
                     if (type == "ollama_cloud" && key.isBlank()) {
@@ -1785,6 +2024,155 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun showEditEndpointDialog(endpoint: Endpoint) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_endpoint, null)
+        val etName = dialogView.findViewById<EditText>(R.id.et_name)
+        val etUrl = dialogView.findViewById<EditText>(R.id.et_url)
+        val etKey = dialogView.findViewById<EditText>(R.id.et_key)
+        val spinnerType = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_type)
+        val tilUrl = dialogView.findViewById<TextInputLayout>(R.id.til_url)
+        val tilKey = dialogView.findViewById<TextInputLayout>(R.id.til_key)
+        val tvHelpLink = dialogView.findViewById<TextView>(R.id.tv_help_link)
+        val btnScan = dialogView.findViewById<MaterialButton>(R.id.btn_scan)
+        val pbScanning = dialogView.findViewById<ProgressBar>(R.id.pb_scanning)
+
+        val baseTypes = listOf("OpenAI", "Ollama Cloud", "Ollama Self-Hosted", "LocalAI", "Generic")
+        val displayType = endpointTypeDisplay(endpoint.type)
+        val types = if (baseTypes.contains(displayType)) baseTypes else baseTypes + displayType
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, types)
+        spinnerType.setAdapter(adapter)
+
+        etName.setText(endpoint.name)
+        etUrl.setText(endpoint.baseUrl)
+        etKey.setText(endpoint.apiKey)
+        spinnerType.setText(displayType, false)
+        applyEndpointTypeUi(displayType, etUrl, tilUrl, btnScan, tvHelpLink, setDefaults = false)
+
+        spinnerType.setOnItemClickListener { _, _, position, _ ->
+            applyEndpointTypeUi(
+                selectedType = types[position],
+                etUrl = etUrl,
+                tilUrl = tilUrl,
+                btnScan = btnScan,
+                tvHelpLink = tvHelpLink,
+                setDefaults = true
+            )
+        }
+
+        btnScan.setOnClickListener {
+            pbScanning.visibility = View.VISIBLE
+            btnScan.isEnabled = false
+            val foundIps = mutableListOf<String>()
+
+            lifecycleScope.launch {
+                networkScanner.scanForOllama(object : NetworkScanner.ScanCallback {
+                    override fun onDeviceFound(ip: String) {
+                        foundIps.add(ip)
+                        etUrl.setText("http://$ip:11434/v1")
+                        Toast.makeText(this@MainActivity, "Found Ollama at $ip", Toast.LENGTH_SHORT).show()
+                    }
+
+                    override fun onScanFinished() {
+                        pbScanning.visibility = View.GONE
+                        btnScan.isEnabled = true
+                        if (foundIps.isEmpty()) {
+                            Toast.makeText(this@MainActivity, "No Ollama servers found in local network", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                })
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Edit Endpoint")
+            .setView(dialogView)
+            .setPositiveButton("Save") { _, _ ->
+                val name = etName.text.toString()
+                val url = etUrl.text.toString()
+                val key = etKey.text.toString()
+                val type = endpointTypeInternal(spinnerType.text.toString())
+
+                if (name.isNotBlank() && url.isNotBlank()) {
+                    if (type == "ollama_cloud" && key.isBlank()) {
+                        Toast.makeText(this, "API Key is required for Ollama Cloud", Toast.LENGTH_SHORT).show()
+                        return@setPositiveButton
+                    }
+                    val endpoints = settingsManager.getEndpoints().toMutableList()
+                    val index = endpoints.indexOfFirst { it.id == endpoint.id }
+                    if (index >= 0) {
+                        endpoints[index] = endpoint.copy(name = name, baseUrl = url, apiKey = key, type = type)
+                        settingsManager.saveEndpoints(endpoints)
+                        modelCacheManager.clearCache(endpoint.id)
+                        endpointAdapter.updateData(endpoints)
+                        categoryAdapter.notifyDataSetChanged()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun endpointTypeDisplay(type: String): String {
+        return when (type.lowercase()) {
+            "openai" -> "OpenAI"
+            "ollama_cloud" -> "Ollama Cloud"
+            "ollama_self-hosted", "ollama_self_hosted" -> "Ollama Self-Hosted"
+            "localai" -> "LocalAI"
+            "generic" -> "Generic"
+            else -> type.replace("_", " ").replace("-", " ").split(" ").joinToString(" ") { it.replaceFirstChar { ch -> ch.uppercase() } }
+        }
+    }
+
+    private fun endpointTypeInternal(display: String): String {
+        return when (display.lowercase()) {
+            "openai" -> "openai"
+            "ollama cloud" -> "ollama_cloud"
+            "ollama self-hosted", "ollama self hosted" -> "ollama_self-hosted"
+            "localai" -> "localai"
+            "generic" -> "generic"
+            else -> display.lowercase().replace(" ", "_")
+        }
+    }
+
+    private fun applyEndpointTypeUi(
+        selectedType: String,
+        etUrl: EditText,
+        tilUrl: TextInputLayout,
+        btnScan: MaterialButton,
+        tvHelpLink: TextView,
+        setDefaults: Boolean
+    ) {
+        when (selectedType) {
+            "OpenAI" -> {
+                if (setDefaults) etUrl.setText("https://api.openai.com/v1")
+                tilUrl.visibility = View.VISIBLE
+                btnScan.visibility = View.GONE
+                tvHelpLink.visibility = View.GONE
+            }
+            "Ollama Cloud" -> {
+                if (setDefaults) etUrl.setText("https://api.ollama.com/v1")
+                tilUrl.visibility = View.GONE
+                btnScan.visibility = View.GONE
+                tvHelpLink.visibility = View.VISIBLE
+                tvHelpLink.setOnClickListener {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://ollama.com/signup"))
+                    startActivity(intent)
+                }
+            }
+            "Ollama Self-Hosted" -> {
+                if (setDefaults) etUrl.setText("http://")
+                tilUrl.visibility = View.VISIBLE
+                btnScan.visibility = View.VISIBLE
+                tvHelpLink.visibility = View.GONE
+            }
+            else -> {
+                tilUrl.visibility = View.VISIBLE
+                btnScan.visibility = View.GONE
+                tvHelpLink.visibility = View.GONE
+            }
+        }
     }
 
     private fun showEditCategoryDialog(category: Category) {
@@ -1821,6 +2209,8 @@ class MainActivity : AppCompatActivity() {
         val endpointAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, endpointNames)
         spinnerPrimaryEndpoint.setAdapter(endpointAdapter)
         spinnerBackupEndpoint.setAdapter(endpointAdapter)
+        spinnerPrimaryModel.threshold = 1
+        spinnerBackupModel.threshold = 1
 
         fun updateModelList(endpointName: String, modelSpinner: AutoCompleteTextView, currentModel: String?) {
             if (endpointName == "Android Default (System)") {
@@ -1829,7 +2219,7 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             if (endpointName == "Local (on-device)") {
-                val localModels = getLocalModelOptions(category)
+                val localModels = getLocalModelOptions(category).sortedBy { it.first.lowercase() }
                 val displayNames = localModels.map { it.first }
                 modelSpinner.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, displayNames))
                 val currentDisplay = localModels.firstOrNull { it.second == currentModel }?.first
@@ -1845,9 +2235,10 @@ class MainActivity : AppCompatActivity() {
             if (endpoint != null) {
                 val cachedModels = modelCacheManager.getModels(endpoint.id)
                 if (cachedModels != null) {
-                    val modelAdapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_dropdown_item_1line, cachedModels)
+                    val sortedModels = cachedModels.sortedBy { it.lowercase() }
+                    val modelAdapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_dropdown_item_1line, sortedModels)
                     modelSpinner.setAdapter(modelAdapter)
-                    if (cachedModels.contains(currentModel)) {
+                    if (sortedModels.contains(currentModel)) {
                         modelSpinner.setText(currentModel, false)
                     }
                     return
@@ -1856,11 +2247,12 @@ class MainActivity : AppCompatActivity() {
                 modelSpinner.setText("Loading models...", false)
                 OpenAiClient(endpoint).fetchModels(object : OpenAiClient.ModelsCallback {
                     override fun onSuccess(models: List<String>) {
-                        modelCacheManager.saveModels(endpoint.id, models)
+                        val sortedModels = models.sortedBy { it.lowercase() }
+                        modelCacheManager.saveModels(endpoint.id, sortedModels)
                         runOnUiThread {
-                            val modelAdapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_dropdown_item_1line, models)
+                            val modelAdapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_dropdown_item_1line, sortedModels)
                             modelSpinner.setAdapter(modelAdapter)
-                            if (models.contains(currentModel)) {
+                            if (sortedModels.contains(currentModel)) {
                                 modelSpinner.setText(currentModel, false)
                             } else {
                                 modelSpinner.setText("", false)

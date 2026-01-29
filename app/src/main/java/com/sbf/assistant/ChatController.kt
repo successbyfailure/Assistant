@@ -53,8 +53,8 @@ class OpenAiChatStreamClient(private val endpoint: Endpoint) : ChatStreamClient 
 
 class ChatController(
     private val settingsManager: SettingsManager,
-    private val toolExecutor: ToolExecutor,
-    private val toolRegistry: ToolRegistry,
+    private var toolExecutor: ToolExecutor,
+    private var toolRegistry: ToolRegistry,
     private val geminiNano: GeminiNanoService?,
     private val localLlm: LocalLlmService?,
     private val mediaPipeLlm: MediaPipeLlmService?,
@@ -72,6 +72,8 @@ class ChatController(
     private var pendingIsPrimary = true
     private var pendingCallbacks: Callbacks? = null
     private var toolRunId = 0
+    private var lastToolResults: List<ToolResult> = emptyList()
+    private var lastToolRunId = 0
     private val toolExecutorPool = Executors.newCachedThreadPool()
     private val toolFutures = mutableMapOf<String, Future<ToolResult>>()
 
@@ -85,7 +87,7 @@ class ChatController(
         fun handleToolGate(call: ToolCall): ToolResult?
     }
 
-    fun processQuery(query: String, callbacks: Callbacks) {
+    fun processQuery(query: String, callbacks: Callbacks, source: String = "chat") {
         cancelRequested = false
         canceledToolCalls.clear()
         pendingToolCalls = null
@@ -98,11 +100,18 @@ class ChatController(
             return
         }
 
-        callbacks.onStatusUpdate("Thinking...")
+        callbacks.onStatusUpdate("LLM thinking")
 
         maybeAddSystemPrompt()
         val userPrefix = settingsManager.agentUserPromptPrefix.trim()
-        val llmQuery = if (userPrefix.isBlank()) query else "$userPrefix\n$query"
+        val resolvedPrefix = if (userPrefix.isBlank()) {
+            ""
+        } else if (settingsManager.agentUserPromptPrefixVarsEnabled) {
+            resolveUserPrefix(userPrefix, source)
+        } else {
+            userPrefix
+        }
+        val llmQuery = if (resolvedPrefix.isBlank()) query else "$resolvedPrefix\n$query"
         llmMessages.add(LlmMessage(role = "user", content = llmQuery))
 
         // Check if it's a local model
@@ -150,9 +159,24 @@ class ChatController(
         }
     }
 
+    fun updateTooling(newToolExecutor: ToolExecutor, newToolRegistry: ToolRegistry) {
+        toolExecutor = newToolExecutor
+        toolRegistry = newToolRegistry
+    }
+
     private fun maybeAddSystemPrompt() {
-        if (llmMessages.isNotEmpty()) return
         val prompt = settingsManager.agentSystemPrompt.trim()
+        if (llmMessages.isNotEmpty()) {
+            val first = llmMessages.firstOrNull()
+            if (first?.role == "system") {
+                if (prompt.isBlank()) {
+                    llmMessages.removeAt(0)
+                } else if (first.content != prompt) {
+                    llmMessages[0] = first.copy(content = prompt)
+                }
+            }
+            return
+        }
         if (prompt.isNotBlank()) {
             llmMessages.add(LlmMessage(role = "system", content = prompt))
         }
@@ -226,6 +250,14 @@ class ChatController(
                             } finally {
                                 toolFutures.remove(call.id)
                             }
+                            if (executed.isError && executed.output.contains("Timeout", ignoreCase = true)) {
+                                val cb = pendingCallbacks
+                                if (cb != null) {
+                                    scope.launch(Dispatchers.Main) {
+                                        cb.onError("Tool timeout: ${call.name}", wasPrimary = true)
+                                    }
+                                }
+                            }
                             if (canceledToolCalls.contains(call.id)) {
                                 results.add(ToolResult(call.id, call.name, "Tool cancelada por el usuario.", true))
                             } else {
@@ -243,9 +275,11 @@ class ChatController(
                                 )
                             )
                         }
+                        lastToolResults = results
+                        lastToolRunId = runId
                         launch(Dispatchers.Main) {
                             if (cancelRequested || runId != toolRunId) return@launch
-                            callbacks.onStatusUpdate("Thinking...")
+                            callbacks.onStatusUpdate("LLM thinking")
                             executeChatRequest(config, isPrimary, callbacks)
                         }
                     }
@@ -259,8 +293,17 @@ class ChatController(
                     if (toolCallsHandled) return@launch
                     if (fullResponse.isNotBlank()) {
                         llmMessages.add(LlmMessage(role = "assistant", content = fullResponse))
+                        callbacks.onResponseComplete(fullResponse)
+                    } else if (lastToolResults.isNotEmpty() && lastToolRunId == toolRunId) {
+                        val fallback = buildToolFallback(lastToolResults)
+                        llmMessages.add(LlmMessage(role = "assistant", content = fallback))
+                        lastToolResults = emptyList()
+                        callbacks.onResponseComplete(fallback)
+                    } else {
+                        val emptyNotice = "LLM returned an empty response."
+                        llmMessages.add(LlmMessage(role = "assistant", content = emptyNotice))
+                        callbacks.onResponseComplete(emptyNotice)
                     }
-                    callbacks.onResponseComplete(fullResponse)
                 }
             }
 
@@ -291,6 +334,23 @@ class ChatController(
 
     fun clearHistory() {
         llmMessages.clear()
+    }
+
+    private fun buildToolFallback(results: List<ToolResult>): String {
+        val maxPerTool = 400
+        val maxTotal = 2000
+        val sb = StringBuilder()
+        sb.append("Resultado de tools:\n")
+        results.forEach { result ->
+            val raw = if (result.isError) "ERROR: ${result.output}" else result.output
+            val cleaned = raw.trim().replace("\n", " ")
+            val clipped = if (cleaned.length > maxPerTool) cleaned.take(maxPerTool) + "..." else cleaned
+            sb.append("- ").append(result.name).append(": ").append(clipped).append("\n")
+        }
+        if (sb.length > maxTotal) {
+            return sb.toString().take(maxTotal) + "..."
+        }
+        return sb.toString().trimEnd()
     }
 
     private fun runLocalInference(modelName: String, callbacks: Callbacks) {
@@ -787,5 +847,11 @@ class ChatController(
         const val MODEL_MEDIAPIPE = "mediapipe"
         const val MODEL_TFLITE = "tflite"
         private const val LOCAL_INFERENCE_TIMEOUT_MS = 120_000L
+    }
+
+    private fun resolveUserPrefix(prefix: String, source: String): String {
+        val now = java.text.SimpleDateFormat("EEE d/M/yy H:mm", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        return prefix.replace("\$source", source).replace("\$now", now)
     }
 }

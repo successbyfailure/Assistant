@@ -671,7 +671,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
                 setToolProgressVisible(false)
             }
             override fun handleToolGate(call: ToolCall): ToolResult? = null
-        })
+        }, source = "assistant")
     }
 
     private fun setToolProgressVisible(visible: Boolean) {
