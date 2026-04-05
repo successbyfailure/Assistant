@@ -19,6 +19,7 @@ class OpenAiClient(private val endpoint: Endpoint) {
     interface StreamCallback {
         fun onToken(token: String)
         fun onToolCalls(toolCalls: List<ToolCall>)
+        fun onUsage(prompt: Int, completion: Int, total: Int)
         fun onComplete()
         fun onError(e: Throwable)
     }
@@ -79,7 +80,7 @@ class OpenAiClient(private val endpoint: Endpoint) {
         })
     }
 
-    fun transcribeAudio(file: File, modelName: String, callback: (String?, Throwable?) -> Unit) {
+    fun transcribeAudio(file: File, modelName: String, callback: (String?, Int, Throwable?) -> Unit) {
         val baseUrl = normalizedBaseUrl()
         val url = if (baseUrl.endsWith("/")) "${baseUrl}audio/transcriptions"
                   else "${baseUrl}/audio/transcriptions"
@@ -102,27 +103,31 @@ class OpenAiClient(private val endpoint: Endpoint) {
 
         client.newCall(requestBuilder.build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                callback(null, e)
+                callback(null, 0, e)
             }
 
             override fun onResponse(call: Call, response: Response) {
                 if (!response.isSuccessful) {
                     val errorBody = response.body?.string()?.take(2000).orEmpty()
                     Log.e(TAG, "STT error ${response.code}: $errorBody")
-                    callback(null, ApiError(response.code, "STT Error: ${response.code} $errorBody"))
+                    callback(null, 0, ApiError(response.code, "STT Error: ${response.code} $errorBody"))
                     return
                 }
                 try {
-                    val json = JSONObject(response.body?.string() ?: "{}")
-                    callback(json.optString("text"), null)
+                    val bodyText = response.body?.string() ?: "{}"
+                    val json = JSONObject(bodyText)
+                    // Some providers return tokens in STT too, but standard OpenAI doesn't.
+                    // We'll estimate or just pass 0 if not found.
+                    val tokens = json.optJSONObject("usage")?.optInt("total_tokens") ?: 0
+                    callback(json.optString("text"), tokens, null)
                 } catch (e: Exception) {
-                    callback(null, e)
+                    callback(null, 0, e)
                 }
             }
         })
     }
 
-    fun generateSpeech(text: String, modelName: String, callback: (File?, Throwable?) -> Unit) {
+    fun generateSpeech(text: String, modelName: String, callback: (File?, Int, Throwable?) -> Unit) {
         val baseUrl = normalizedBaseUrl()
         val url = if (baseUrl.endsWith("/")) "${baseUrl}audio/speech"
                   else "${baseUrl}/audio/speech"
@@ -143,26 +148,28 @@ class OpenAiClient(private val endpoint: Endpoint) {
 
         client.newCall(requestBuilder.build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                callback(null, e)
+                callback(null, 0, e)
             }
 
             override fun onResponse(call: Call, response: Response) {
                 if (!response.isSuccessful) {
                     val errorBody = response.body?.string()?.take(2000).orEmpty()
                     Log.e(TAG, "TTS error ${response.code}: $errorBody")
-                    callback(null, ApiError(response.code, "TTS Error: ${response.code}"))
+                    callback(null, 0, ApiError(response.code, "TTS Error: ${response.code}"))
                     return
                 }
                 try {
+                    // Estimate tokens for TTS (approx 1 token per 4 chars)
+                    val tokens = (text.length / 4).coerceAtLeast(1)
                     val tempFile = File.createTempFile("tts_", ".mp3")
                     response.body?.source()?.let { source ->
                         tempFile.outputStream().use { output ->
                             output.write(source.readByteArray())
                         }
-                        callback(tempFile, null)
-                    } ?: callback(null, Exception("Empty body"))
+                        callback(tempFile, tokens, null)
+                    } ?: callback(null, 0, Exception("Empty body"))
                 } catch (e: Exception) {
-                    callback(null, e)
+                    callback(null, 0, e)
                 }
             }
         })
@@ -187,6 +194,8 @@ class OpenAiClient(private val endpoint: Endpoint) {
         val json = JSONObject().apply {
             put("model", modelName)
             put("stream", true)
+            // Request usage in stream if supported (OpenAI supports this via stream_options)
+            put("stream_options", JSONObject().apply { put("include_usage", true) })
             val jsonMessages = JSONArray().apply {
                 messages.forEach { put(it.toJson()) }
             }
@@ -198,15 +207,6 @@ class OpenAiClient(private val endpoint: Endpoint) {
             }
         }
         Log.d(TAG, "Chat request model=$modelName messages=${messages.size} tools=${toolsToSend.size} endpointType=${endpoint.type}")
-        if (toolsToSend.isNotEmpty()) {
-            Log.d(TAG, "Tool schema sample: ${toolsToSend.first().toOpenAiJson()}")
-            toolsToSend.forEach { tool ->
-                val required = tool.parameters.opt("required")
-                if (required != null && required !is JSONArray) {
-                    Log.w(TAG, "Invalid required type for tool ${tool.name}: ${required.javaClass}")
-                }
-            }
-        }
 
         val requestBuilder = Request.Builder()
             .url(url)
@@ -224,12 +224,9 @@ class OpenAiClient(private val endpoint: Endpoint) {
             }
 
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
-                Log.d(TAG, "Stream event: data.length=${data.length}")
                 if (data == "[DONE]") {
-                    Log.d(TAG, "Stream complete: [DONE] received")
                     if (toolBuilders.isNotEmpty()) {
                         val built = toolBuilders.toSortedMap().values.mapNotNull { it.build() }
-                        Log.d(TAG, "Tool calls detected at DONE: ${built.size}")
                         if (built.isNotEmpty()) {
                             callback.onToolCalls(built)
                         }
@@ -240,7 +237,17 @@ class OpenAiClient(private val endpoint: Endpoint) {
                 }
                 try {
                     val jsonResponse = JSONObject(data)
-                    val choices = jsonResponse.getJSONArray("choices")
+                    
+                    // Parse usage if present
+                    if (jsonResponse.has("usage")) {
+                        val usage = jsonResponse.getJSONObject("usage")
+                        val p = usage.optInt("prompt_tokens")
+                        val c = usage.optInt("completion_tokens")
+                        val t = usage.optInt("total_tokens")
+                        callback.onUsage(p, c, t)
+                    }
+
+                    val choices = jsonResponse.optJSONArray("choices") ?: JSONArray()
                     if (choices.length() > 0) {
                         val choice = choices.getJSONObject(0)
                         val delta = choice.optJSONObject("delta") ?: JSONObject()
@@ -256,63 +263,21 @@ class OpenAiClient(private val endpoint: Endpoint) {
                                 val index = toolCall.optInt("index", i)
                                 val builder = toolBuilders.getOrPut(index) { ToolCallBuilder() }
                                 val idValue = toolCall.optString("id")
-                                if (idValue.isNotBlank()) {
-                                    builder.id = idValue
-                                }
+                                if (idValue.isNotBlank()) builder.id = idValue
                                 val function = toolCall.optJSONObject("function")
                                 if (function != null) {
                                     val nameValue = function.optString("name")
-                                    if (nameValue.isNotBlank()) {
-                                        builder.name = nameValue
-                                    }
+                                    if (nameValue.isNotBlank()) builder.name = nameValue
                                     val argumentsValue = function.optString("arguments")
-                                    if (argumentsValue.isNotBlank()) {
-                                        builder.arguments.append(argumentsValue)
-                                    }
+                                    if (argumentsValue.isNotBlank()) builder.arguments.append(argumentsValue)
                                 }
                             }
                             emitted = true
                         }
-                        // Some providers send non-streaming chunks with "message" instead of "delta"
-                        val message = choice.optJSONObject("message")
-                        if (message != null) {
-                            if (!delta.has("content") && message.has("content")) {
-                                callback.onToken(message.getString("content"))
-                                emitted = true
-                            }
-                            if (!delta.has("tool_calls") && message.has("tool_calls")) {
-                                val toolCalls = message.getJSONArray("tool_calls")
-                                for (i in 0 until toolCalls.length()) {
-                                    val toolCall = toolCalls.getJSONObject(i)
-                                    val index = toolCall.optInt("index", i)
-                                    val builder = toolBuilders.getOrPut(index) { ToolCallBuilder() }
-                                    val idValue = toolCall.optString("id")
-                                    if (idValue.isNotBlank()) {
-                                        builder.id = idValue
-                                    }
-                                    val function = toolCall.optJSONObject("function")
-                                    if (function != null) {
-                                        val nameValue = function.optString("name")
-                                        if (nameValue.isNotBlank()) {
-                                            builder.name = nameValue
-                                        }
-                                        val argumentsValue = function.optString("arguments")
-                                        if (argumentsValue.isNotBlank()) {
-                                            builder.arguments.append(argumentsValue)
-                                        }
-                                    }
-                                }
-                                emitted = true
-                            }
-                        }
-                        if (!emitted) {
-                            Log.d(TAG, "Unparsed choice payload: ${choice.toString().take(500)}")
-                            Log.d(TAG, "Unparsed SSE data: ${data.take(500)}")
-                        }
+                        
                         val finishReason = choice.optString("finish_reason")
                         if (finishReason.isNotBlank() && toolBuilders.isNotEmpty()) {
                             val built = toolBuilders.toSortedMap().values.mapNotNull { it.build() }
-                            Log.d(TAG, "Tool calls detected (finish_reason=$finishReason): ${built.size}")
                             if (built.isNotEmpty()) {
                                 callback.onToolCalls(built)
                             }
@@ -329,15 +294,12 @@ class OpenAiClient(private val endpoint: Endpoint) {
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                Log.e(TAG, "Stream failure: t=${t?.message} response=${response?.code}")
                 toolBuilders.clear()
                 val error = if (response != null && !response.isSuccessful) {
                     val errorBody = response.body?.string()?.take(2000).orEmpty()
-                    Log.e(TAG, "Chat error ${response.code}: $errorBody")
                     val msg = when (response.code) {
                         401 -> "Error 401: API Key no autorizada"
                         429 -> "Error 429: Demasiadas peticiones"
-                        400 -> "Error 400: Solicitud invalida"
                         else -> "Error ${response.code}: ${response.message}"
                     }
                     ApiError(response.code, msg)
@@ -348,7 +310,6 @@ class OpenAiClient(private val endpoint: Endpoint) {
             }
         }
 
-        Log.d(TAG, "Starting EventSource to $url")
         return EventSources.createFactory(client).newEventSource(requestBuilder.build(), eventSourceListener)
     }
 
@@ -411,15 +372,12 @@ class OpenAiClient(private val endpoint: Endpoint) {
                 is JSONArray -> Unit
                 is String -> {
                     normalized.put("required", JSONArray().put(required))
-                    Log.w(TAG, "Normalized required string to array for schema.")
                 }
                 is List<*> -> {
                     normalized.put("required", JSONArray(required))
-                    Log.w(TAG, "Normalized required list to array for schema.")
                 }
                 else -> {
                     normalized.remove("required")
-                    Log.w(TAG, "Removed invalid required type: ${required?.javaClass}")
                 }
             }
         }

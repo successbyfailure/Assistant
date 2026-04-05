@@ -81,7 +81,7 @@ class WhisperController(
             return
         }
 
-        OpenAiClient(endpoint).transcribeAudio(file, config.modelName) { text, error ->
+        OpenAiClient(endpoint).transcribeAudio(file, config.modelName) { text, _, error ->
             audioRecorder.deleteFile(file)
             mainHandler.post { onResult(text, error?.message) }
         }

@@ -17,14 +17,36 @@
         app:cardBackgroundColor="?attr/colorPrimaryContainer"
         app:strokeWidth="0dp">
 
-        <TextView
-            android:id="@+id/tv_message"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="12dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-            android:textColor="?attr/colorOnPrimaryContainer"
-            android:textIsSelectable="true" />
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:id="@+id/tv_message"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                android:textColor="?attr/colorOnPrimaryContainer"
+                android:textIsSelectable="true" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_tts"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:layout_gravity="end"
+                android:minHeight="32dp"
+                android:minWidth="32dp"
+                android:padding="4dp"
+                android:contentDescription="Leer en voz alta"
+                app:icon="@android:drawable/ic_btn_speak_now"
+                app:iconSize="18dp"
+                app:iconTint="?attr/colorOnPrimaryContainer"
+                android:visibility="gone" />
+        </LinearLayout>
 
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

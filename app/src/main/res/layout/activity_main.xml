@@ -18,7 +18,8 @@
             android:id="@+id/tab_layout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:tabIndicatorFullWidth="false" />
+            app:tabIndicatorFullWidth="false"
+            app:tabMode="scrollable" />
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -152,17 +153,13 @@
                         android:id="@+id/sw_tool_sms"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_sms"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -182,17 +179,13 @@
                         android:id="@+id/sw_tool_call"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_call"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -212,17 +205,13 @@
                         android:id="@+id/sw_tool_alarm"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_alarm"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -242,17 +231,13 @@
                         android:id="@+id/sw_tool_open_app"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_open_app"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -272,17 +257,13 @@
                         android:id="@+id/sw_tool_contacts"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_contacts"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -302,17 +283,13 @@
                         android:id="@+id/sw_tool_location"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_location"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -332,17 +309,13 @@
                         android:id="@+id/sw_tool_weather"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_weather"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -362,17 +335,13 @@
                         android:id="@+id/sw_tool_notifications"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Habilitar"
-                        app:thumbTint="@color/switch_enabled_thumb"
-                        app:trackTint="@color/switch_enabled_track" />
+                        android:text="Habilitar" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/sw_tool_ask_notifications"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Preguntar"
-                        app:thumbTint="@color/switch_ask_thumb"
-                        app:trackTint="@color/switch_ask_track" />
+                        android:text="Preguntar" />
                 </LinearLayout>
 
                 <com.google.android.material.button.MaterialButton
@@ -484,6 +453,27 @@
                     android:text="Activar palabra clave" />
 
                 <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/sw_auto_conversation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Auto-conversacion (escucha tras TTS)"
+                    android:layout_marginTop="8dp" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_auto_conversation_timeout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="Timeout auto-conversacion (ms)">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_auto_conversation_timeout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/sw_tts_chunk"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -536,7 +526,370 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:inputType="textCapSentences" />
-                </com.google.android.material.textfield.TextInputLayout>
+                    </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/section_stats"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Estadisticas"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tokens totales"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:alpha="0.7" />
+
+                <TextView
+                    android:id="@+id/tv_stats_total_tokens"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tokens tools/MCP"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:alpha="0.7" />
+
+                <TextView
+                    android:id="@+id/tv_stats_tools_tokens"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Distribucion de tokens"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                    android:layout_marginBottom="6dp" />
+
+                <TextView
+                    android:id="@+id/tv_stats_distribution_empty"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Sin datos"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:alpha="0.7"
+                    android:layout_marginBottom="8dp"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:id="@+id/chart_tokens_distribution"
+                    android:layout_width="match_parent"
+                    android:layout_height="12dp"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="12dp">
+
+                    <View
+                        android:id="@+id/bar_dist_llm"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1" />
+
+                    <View
+                        android:id="@+id/bar_dist_stt"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1" />
+
+                    <View
+                        android:id="@+id/bar_dist_tts"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1" />
+
+                    <View
+                        android:id="@+id/bar_dist_tools"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1" />
+
+                    <View
+                        android:id="@+id/bar_dist_mcp"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Por modelo/servicio"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:alpha="0.7" />
+
+                <TextView
+                    android:id="@+id/tv_stats_model_breakdown"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tokens ultima semana"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                    android:layout_marginBottom="6dp" />
+
+                <LinearLayout
+                    android:id="@+id/chart_tokens_week"
+                    android:layout_width="match_parent"
+                    android:layout_height="72dp"
+                    android:orientation="horizontal"
+                    android:gravity="bottom"
+                    android:layout_marginBottom="16dp">
+
+                    <LinearLayout
+                        android:id="@+id/bar_day_0"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="bottom|center_horizontal">
+
+                        <View
+                            android:id="@+id/bar_day_0_fill"
+                            android:layout_width="10dp"
+                            android:layout_height="4dp" />
+
+                        <TextView
+                            android:id="@+id/bar_day_0_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:alpha="0.7"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/bar_day_1"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="bottom|center_horizontal">
+
+                        <View
+                            android:id="@+id/bar_day_1_fill"
+                            android:layout_width="10dp"
+                            android:layout_height="4dp" />
+
+                        <TextView
+                            android:id="@+id/bar_day_1_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:alpha="0.7"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/bar_day_2"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="bottom|center_horizontal">
+
+                        <View
+                            android:id="@+id/bar_day_2_fill"
+                            android:layout_width="10dp"
+                            android:layout_height="4dp" />
+
+                        <TextView
+                            android:id="@+id/bar_day_2_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:alpha="0.7"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/bar_day_3"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="bottom|center_horizontal">
+
+                        <View
+                            android:id="@+id/bar_day_3_fill"
+                            android:layout_width="10dp"
+                            android:layout_height="4dp" />
+
+                        <TextView
+                            android:id="@+id/bar_day_3_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:alpha="0.7"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/bar_day_4"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="bottom|center_horizontal">
+
+                        <View
+                            android:id="@+id/bar_day_4_fill"
+                            android:layout_width="10dp"
+                            android:layout_height="4dp" />
+
+                        <TextView
+                            android:id="@+id/bar_day_4_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:alpha="0.7"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/bar_day_5"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="bottom|center_horizontal">
+
+                        <View
+                            android:id="@+id/bar_day_5_fill"
+                            android:layout_width="10dp"
+                            android:layout_height="4dp" />
+
+                        <TextView
+                            android:id="@+id/bar_day_5_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:alpha="0.7"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/bar_day_6"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="bottom|center_horizontal">
+
+                        <View
+                            android:id="@+id/bar_day_6_fill"
+                            android:layout_width="10dp"
+                            android:layout_height="4dp" />
+
+                        <TextView
+                            android:id="@+id/bar_day_6_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:alpha="0.7"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LLM"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_stats_llm_tokens"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
+
+                <TextView
+                    android:id="@+id/tv_stats_llm_calls"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="STT"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_stats_stt_tokens"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
+
+                <TextView
+                    android:id="@+id/tv_stats_stt_calls"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="TTS"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_stats_tts_tokens"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
+
+                <TextView
+                    android:id="@+id/tv_stats_tts_calls"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tools"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_stats_tools_calls"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:layout_marginBottom="16dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_clear_stats"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Resetear estadisticas" />
             </LinearLayout>
 
             <LinearLayout
@@ -828,6 +1181,86 @@
                     android:alpha="0.7"
                     android:layout_marginBottom="12dp" />
 
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/section_statistics"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Estadísticas de Uso"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:layout_marginBottom="8dp" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardCornerRadius="12dp"
+                    app:contentPadding="16dp"
+                    android:layout_marginBottom="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tv_stats_llm"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="LLM: 0 llamadas, 0 tokens"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+                        <TextView
+                            android:id="@+id/tv_stats_stt"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="STT: 0 llamadas, 0 tokens"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+                        <TextView
+                            android:id="@+id/tv_stats_tts"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="TTS: 0 llamadas, 0 tokens"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+                        <TextView
+                            android:id="@+id/tv_stats_tools"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Tools: 0 ejecuciones"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+                        <com.google.android.material.divider.MaterialDivider
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginVertical="12dp" />
+
+                        <TextView
+                            android:id="@+id/tv_stats_total"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Total Tokens: 0"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="?attr/colorPrimary" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_reset_stats"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Reiniciar estadísticas" />
             </LinearLayout>
 
         </LinearLayout>

@@ -12,6 +12,12 @@ class TtsController(
     context: Context,
     private val settingsManager: SettingsManager
 ) {
+    enum class PlaybackState {
+        IDLE,
+        WAITING,
+        PLAYING
+    }
+
     private val appContext = context.applicationContext
     private val ttsManager = TTSManager(appContext)
     private var ttsMediaPlayer: MediaPlayer? = null
@@ -23,6 +29,7 @@ class TtsController(
     private var systemBusy = false
     private val streamingBuffer = StringBuilder()
     private var streamingFinalPending = false
+    private var streamingActive = false
     private val streamHandler = Handler(Looper.getMainLooper())
     private val streamFlushDelayMs = 800L
     private val streamMinChunkChars = 40
@@ -30,6 +37,8 @@ class TtsController(
     private val drainHandler = Handler(Looper.getMainLooper())
     private val drainDelayMs = 300L
     private val drainRunnable = Runnable { kickDrain() }
+    private var playbackState = PlaybackState.IDLE
+    private var playbackStateListener: ((PlaybackState) -> Unit)? = null
 
     var enabled: Boolean
         get() = settingsManager.ttsAutoReadEnabled
@@ -42,6 +51,10 @@ class TtsController(
 
     private var onSpeechComplete: (() -> Unit)? = null
 
+    fun setPlaybackStateListener(listener: ((PlaybackState) -> Unit)?) {
+        playbackStateListener = listener
+    }
+
     fun speak(text: String, onComplete: (() -> Unit)? = null) {
         if (settingsManager.ttsChunkOnPunctuation) {
             stop()
@@ -51,18 +64,23 @@ class TtsController(
             onComplete?.invoke()
             return
         }
+        streamingActive = false
         val ttsPref = settingsManager.getCategoryConfig(Category.TTS).primary
         if (ttsPref == null || ttsPref.endpointId == "system") {
             val chunks = if (settingsManager.ttsChunkOnPunctuation) splitForTts(text) else listOf(text)
             if (chunks.size <= 1) {
+                updatePlaybackState(PlaybackState.PLAYING)
                 ttsManager.speak(text, onComplete = {
+                    recomputePlaybackState()
                     mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
                 })
             } else {
                 chunks.forEachIndexed { index, chunk ->
                     val isLast = index == chunks.lastIndex
+                    updatePlaybackState(PlaybackState.PLAYING)
                     ttsManager.speak(chunk, onComplete = if (isLast) {
                         {
+                            recomputePlaybackState()
                             mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
                         }
                     } else null)
@@ -80,21 +98,26 @@ class TtsController(
                 onComplete?.invoke()
                 return
             }
+            streamingActive = false
             ttsQueue.clear()
             ttsQueue.addAll(chunks)
             queueEndpoint = endpoint
             queueModelName = ttsPref.modelName
             streamingFinalPending = true
+            updatePlaybackState(PlaybackState.WAITING)
             generateNextChunk()
             return
         }
-        OpenAiClient(endpoint).generateSpeech(text, ttsPref.modelName) { file, error ->
+        updatePlaybackState(PlaybackState.WAITING)
+        OpenAiClient(endpoint).generateSpeech(text, ttsPref.modelName) { file, _, error ->
             if (file != null) {
                 playFile(file) {
+                    recomputePlaybackState()
                     mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
                 }
             } else {
                 Log.w(TAG, "TTS generation failed: ${error?.message}")
+                recomputePlaybackState()
                 mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
             }
         }
@@ -113,8 +136,10 @@ class TtsController(
         systemBusy = false
         streamingBuffer.clear()
         streamingFinalPending = false
+        streamingActive = false
         streamHandler.removeCallbacks(streamFlushRunnable)
         drainHandler.removeCallbacks(drainRunnable)
+        updatePlaybackState(PlaybackState.IDLE)
     }
 
     fun release() {
@@ -139,9 +164,11 @@ class TtsController(
                         ttsMediaPlayer = null
                         cleanupFile(file)
                         onComplete()
+                        recomputePlaybackState()
                     }
                     setDataSource(file.absolutePath)
                     prepare()
+                    updatePlaybackState(PlaybackState.PLAYING)
                     start()
                 }
             } catch (e: Exception) {
@@ -150,6 +177,7 @@ class TtsController(
                 ttsMediaPlayer = null
                 cleanupFile(file)
                 onComplete()
+                recomputePlaybackState()
             }
         }
     }
@@ -161,13 +189,16 @@ class TtsController(
         if (endpoint == null || modelName == null || next == null) {
             if (streamingFinalPending && ttsQueue.isEmpty()) {
                 streamingFinalPending = false
+                streamingActive = false
+                recomputePlaybackState()
                 mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
             }
             return
         }
         if (remoteBusy) return
         remoteBusy = true
-        OpenAiClient(endpoint).generateSpeech(next, modelName) { file, error ->
+        updatePlaybackState(PlaybackState.WAITING)
+        OpenAiClient(endpoint).generateSpeech(next, modelName) { file, _, error ->
             if (file != null) {
                 playFile(file) {
                     remoteBusy = false
@@ -191,8 +222,10 @@ class TtsController(
         }
         if (systemBusy) return
         systemBusy = true
+        updatePlaybackState(PlaybackState.PLAYING)
         ttsManager.speak(next, onComplete = {
             systemBusy = false
+            recomputePlaybackState()
             generateNextSystemChunk()
         })
     }
@@ -202,8 +235,10 @@ class TtsController(
         onSpeechComplete = onComplete
         streamingBuffer.clear()
         streamingFinalPending = false
+        streamingActive = true
         streamHandler.removeCallbacks(streamFlushRunnable)
         drainHandler.removeCallbacks(drainRunnable)
+        updatePlaybackState(PlaybackState.WAITING)
     }
 
     fun feedStreaming(text: String, isFinal: Boolean) {
@@ -220,6 +255,7 @@ class TtsController(
             streamHandler.postDelayed(streamFlushRunnable, streamFlushDelayMs)
         }
         kickDrain()
+        recomputePlaybackState()
     }
 
     private fun emitStreamingChunks(flushAll: Boolean, allowPartial: Boolean) {
@@ -312,8 +348,10 @@ class TtsController(
         }
         if (streamingFinalPending && ttsQueue.isEmpty() && !remoteBusy && !systemBusy) {
             streamingFinalPending = false
+            streamingActive = false
             mainHandler.post { onSpeechComplete?.invoke(); onSpeechComplete = null }
         }
+        recomputePlaybackState()
     }
 
     private fun cleanupFile(file: File) {
@@ -326,5 +364,30 @@ class TtsController(
 
     companion object {
         private const val TAG = "TtsController"
+    }
+
+    private fun updatePlaybackState(state: PlaybackState) {
+        if (playbackState == state) return
+        playbackState = state
+        mainHandler.post { playbackStateListener?.invoke(state) }
+    }
+
+    private fun recomputePlaybackState() {
+        if (!enabled) {
+            updatePlaybackState(PlaybackState.IDLE)
+            return
+        }
+        val playing = (ttsMediaPlayer?.isPlaying == true) || systemBusy
+        if (playing) {
+            updatePlaybackState(PlaybackState.PLAYING)
+            return
+        }
+        val waitingForChunks = streamingActive && !streamingFinalPending
+        val waitingForQueue = ttsQueue.isNotEmpty() || streamingBuffer.isNotEmpty() || remoteBusy
+        if (waitingForChunks || waitingForQueue) {
+            updatePlaybackState(PlaybackState.WAITING)
+        } else {
+            updatePlaybackState(PlaybackState.IDLE)
+        }
     }
 }

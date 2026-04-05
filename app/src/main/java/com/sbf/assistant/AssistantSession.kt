@@ -7,6 +7,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.service.voice.VoiceInteractionSession
+import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -41,7 +42,12 @@ import com.sbf.assistant.llm.MediaPipeLlmService
  * Implementa Barge-in (escucha mientras habla) y Standby dinámico.
  */
 class AssistantSession(context: Context) : VoiceInteractionSession(context), LifecycleOwner {
-    
+
+    companion object {
+        private const val TAG = "AssistantSession"
+        private const val POST_TTS_STANDBY_MS = 8_000L
+    }
+
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
@@ -78,9 +84,11 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     private lateinit var chatController: ChatController
     private var isRequestInFlight = false
     private var currentAssistantMessageIndex = -1
-    private var currentTokenCount = 0
     private var currentToolCount = 0
     private var lastRequestTokenCount = 0
+    private var currentPromptTokens = 0
+    private var currentCompletionTokens = 0
+    private var currentTotalTokens = 0
     private var statusTickerJob: Job? = null
     private var sttMode: SttMode = SttMode.NONE
     private var activeSttConfig: ModelConfig? = null
@@ -166,7 +174,8 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         chatAdapter = ChatAdapter(messages, themedContext, 
             onCancelClick = { index -> cancelToolCallsFromUi(index) },
             onStatsClick = { index -> showStatsForMessage(index) },
-            onThoughtToggle = { index -> toggleThought(index) })
+            onThoughtToggle = { index -> toggleThought(index) },
+            onSpeakClick = { index -> speakMessageAt(index) })
         chatRecycler.adapter = chatAdapter
         chatRecycler.itemAnimator = null 
         chatRecycler.layoutManager = LinearLayoutManager(context).apply { stackFromEnd = true }
@@ -200,13 +209,15 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
 
     private fun setupStandbyToggle() {
         // Leer el setting actual - si está deshabilitado, no activar standby
-        isStandbyModeActive = settingsManager.voiceShortcutEnabled
+        isStandbyModeActive = settingsManager.voiceShortcutEnabled && settingsManager.autoConversationEnabled
         updateStandbyIcon()
+        Log.d(TAG, "setupStandbyToggle: voiceShortcutEnabled=${settingsManager.voiceShortcutEnabled} autoConversationEnabled=${settingsManager.autoConversationEnabled} isStandbyModeActive=$isStandbyModeActive")
 
         btnStandbyToggle.setOnClickListener {
             // Solo permitir toggle si el setting está habilitado
-            if (!settingsManager.voiceShortcutEnabled) {
-                statusText.text = "Activa 'Palabra clave' en ajustes"
+            if (!settingsManager.voiceShortcutEnabled || !settingsManager.autoConversationEnabled) {
+                statusText.text = "Activa 'Palabra clave' y auto-conversacion en ajustes"
+                Log.d(TAG, "standby toggle blocked: voiceShortcutEnabled=${settingsManager.voiceShortcutEnabled} autoConversationEnabled=${settingsManager.autoConversationEnabled}")
                 return@setOnClickListener
             }
             isStandbyModeActive = !isStandbyModeActive
@@ -216,6 +227,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
                 stopStandbyMonitor()
                 statusText.text = "Escucha de palabra clave desactivada"
             }
+            Log.d(TAG, "standby toggle: isStandbyModeActive=$isStandbyModeActive")
         }
     }
 
@@ -306,6 +318,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         activeSttConfig = null
 
         val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
+        Log.d(TAG, "startListeningAuto: sttConfig=${sttConfig?.endpointId ?: "none"}")
         if (sttConfig?.endpointId == "system" || sttConfig == null) {
             sttMode = SttMode.AUTO
             startSystemListening()
@@ -324,6 +337,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         isTtsSpeaking = false
 
         val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
+        Log.d(TAG, "startListeningPTT: sttConfig=${sttConfig?.endpointId ?: "none"}")
         if (sttConfig != null && sttConfig.endpointId != "system") {
             startWhisperMode(sttConfig, ptt = true)
         } else {
@@ -332,6 +346,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     }
 
     private fun startSystemListening() {
+        Log.d(TAG, "startSystemListening: sttMode=$sttMode isStandbyModeActive=$isStandbyModeActive")
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -383,6 +398,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
         speechRecognizer?.startListening(intent)
+        Log.d(TAG, "SpeechRecognizer.startListening called")
     }
 
     private fun handleSystemVoiceResult(query: String, isPartial: Boolean = false) {
@@ -424,6 +440,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     }
 
     private fun startWhisperMode(config: ModelConfig, ptt: Boolean) {
+        Log.d(TAG, "startWhisperMode: endpoint=${config.endpointId} ptt=$ptt")
         // Guardar config y modo ANTES del coroutine para evitar race conditions
         activeSttConfig = config
         sttMode = if (ptt) SttMode.PTT else SttMode.AUTO
@@ -464,6 +481,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     }
 
     private fun stopWhisperAndTranscribe(config: ModelConfig) {
+        Log.d(TAG, "stopWhisperAndTranscribe: endpoint=${config.endpointId}")
         sttMode = SttMode.NONE
         activeSttConfig = null
         showSttUi(false)
@@ -488,6 +506,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     }
 
     private fun cancelWhisper() {
+        Log.d(TAG, "cancelWhisper")
         whisperController.cancelRecording()
         sttMode = SttMode.NONE
         activeSttConfig = null
@@ -496,7 +515,8 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     }
 
     private fun startStandbyMonitor() {
-        if (!isStandbyModeActive || !isSessionActive) return
+        if (!isStandbyModeActive || !isSessionActive || !settingsManager.autoConversationEnabled) return
+        Log.d(TAG, "startStandbyMonitor: sessionActive=$isSessionActive")
         standbyTimeoutJob?.cancel()
         sttMode = SttMode.STANDBY
         startSystemListening()
@@ -507,10 +527,11 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         }
     }
 
-    private fun startStandbyTimeout() {
+    private fun startStandbyTimeout(timeoutMs: Long = STANDBY_TIMEOUT_MS) {
         standbyTimeoutJob?.cancel()
+        Log.d(TAG, "startStandbyTimeout ms=$timeoutMs")
         standbyTimeoutJob = scope.launch {
-            delay(STANDBY_TIMEOUT_MS)
+            delay(timeoutMs)
             if (isSessionActive && sttMode == SttMode.STANDBY) {
                 withContext(Dispatchers.Main) {
                     goToSleep()
@@ -525,10 +546,12 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         if (sttMode == SttMode.STANDBY) {
             speechRecognizer?.stopListening()
             sttMode = SttMode.NONE
+            Log.d(TAG, "stopStandbyMonitor: stopListening")
         }
     }
 
     private fun goToSleep() {
+        Log.d(TAG, "goToSleep")
         stopStandbyMonitor()
         sttMode = SttMode.NONE
         statusText.text = "En reposo - Toca el micrófono"
@@ -553,17 +576,21 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
+        Log.d(TAG, "onShow")
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         isSessionActive = true
         // Warmup both STT and LLM for voice interaction
         warmupManager.warmupStt()
         warmupManager.warmupLlm()
         // Force start recording on first open
-        startListeningAuto()
+        if (settingsManager.autoConversationEnabled) {
+            startListeningAuto()
+        }
     }
 
     override fun onHide() {
         super.onHide()
+        Log.d(TAG, "onHide")
         isSessionActive = false  // IMPORTANTE: marcar como inactiva ANTES de limpiar
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
 
@@ -581,6 +608,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "onDestroy")
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
 
         // Limpiar completamente
@@ -600,7 +628,9 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         historyStore.append(ChatMessage(query, true))
 
         currentAssistantMessageIndex = -1
-        currentTokenCount = 0
+        currentPromptTokens = 0
+        currentCompletionTokens = 0
+        currentTotalTokens = 0
         currentToolCount = 0
         isRequestInFlight = true
         val requestStartMs = android.os.SystemClock.elapsedRealtime()
@@ -623,7 +653,18 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
             override fun onResponseToken(token: String) {
                 // ... logic for tokens ...
                 if (currentAssistantMessageIndex == -1) {
-                    messages.add(ChatMessage(token, false, stats = ChatStats(currentToolCount, currentTokenCount)))
+                    messages.add(
+                        ChatMessage(
+                            token,
+                            false,
+                            stats = ChatStats(
+                                toolCount = currentToolCount,
+                                promptTokens = currentPromptTokens,
+                                completionTokens = currentCompletionTokens,
+                                totalTokens = currentTotalTokens
+                            )
+                        )
+                    )
                     currentAssistantMessageIndex = messages.size - 1
                     chatAdapter.notifyItemInserted(currentAssistantMessageIndex)
                 } else {
@@ -634,17 +675,44 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
                 chatRecycler.scrollToPosition(messages.size - 1)
             }
 
+            override fun onUsageUpdate(promptTokens: Int, completionTokens: Int, totalTokens: Int) {
+                currentPromptTokens = promptTokens
+                currentCompletionTokens = completionTokens
+                currentTotalTokens = totalTokens
+                lastRequestTokenCount = totalTokens
+                if (currentAssistantMessageIndex != -1) {
+                    val msg = messages[currentAssistantMessageIndex]
+                    messages[currentAssistantMessageIndex] = msg.copy(
+                        stats = ChatStats(
+                            toolCount = currentToolCount,
+                            promptTokens = currentPromptTokens,
+                            completionTokens = currentCompletionTokens,
+                            totalTokens = currentTotalTokens
+                        )
+                    )
+                    chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
+                }
+            }
+
             override fun onResponseComplete(fullResponse: String) {
                 isRequestInFlight = false
                 statusTickerJob?.cancel()
                 setToolProgressVisible(false)
 
+                if (currentCompletionTokens == 0 && fullResponse.isNotBlank()) {
+                    currentCompletionTokens = (fullResponse.length / 4).coerceAtLeast(1)
+                }
+                if (currentTotalTokens == 0) {
+                    currentTotalTokens = currentPromptTokens + currentCompletionTokens
+                    lastRequestTokenCount = currentTotalTokens
+                }
+
                 historyStore.append(ChatMessage(fullResponse, false))
 
-                // Barge-in: empezar a escuchar DURANTE el TTS para permitir interrupciones
+                // Barge-in: escuchar DURANTE el TTS para permitir interrupciones
                 // Solo si el setting está habilitado Y el usuario tiene el modo activo
                 isTtsSpeaking = true
-                if (isStandbyModeActive && settingsManager.voiceShortcutEnabled) {
+                if (isStandbyModeActive && settingsManager.voiceShortcutEnabled && settingsManager.autoConversationEnabled) {
                     startStandbyMonitor()
                 }
 
@@ -653,8 +721,8 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
                     if (!isStandbyModeActive) {
                         statusText.text = "Assistant Ready"
                     } else if (sttMode == SttMode.STANDBY) {
-                        // TTS terminó, ahora sí iniciar el timeout de 30 segundos
-                        startStandbyTimeout()
+                        // TTS terminó, mantener escucha unos segundos
+                        startStandbyTimeout(settingsManager.autoConversationTimeoutMs)
                     }
                 }
 
@@ -688,7 +756,15 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     private fun showStatsForMessage(index: Int) {
         val message = messages.getOrNull(index) ?: return
         val stats = message.stats ?: return
-        AlertDialog.Builder(context).setTitle("Estadisticas").setMessage("Tools: ${stats.toolCount}\nTokens: ${stats.tokenCount}").setPositiveButton("OK", null).show()
+        AlertDialog.Builder(context).setTitle("Estadisticas").setMessage("Tools: ${stats.toolCount}\nTokens: ${stats.totalTokens}").setPositiveButton("OK", null).show()
+    }
+
+    private fun speakMessageAt(index: Int) {
+        val message = messages.getOrNull(index) ?: return
+        val text = message.text.trim()
+        if (text.isBlank()) return
+        ttsController.stop()
+        ttsController.speak(text)
     }
 
     private fun toggleThought(index: Int) {

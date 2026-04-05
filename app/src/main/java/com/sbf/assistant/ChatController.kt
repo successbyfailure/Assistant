@@ -80,6 +80,7 @@ class ChatController(
     interface Callbacks {
         fun onStatusUpdate(status: String)
         fun onResponseToken(token: String)
+        fun onUsageUpdate(promptTokens: Int, completionTokens: Int, totalTokens: Int)
         fun onResponseComplete(fullResponse: String)
         fun onToolExecutionStart()
         fun onToolCalls(toolCalls: List<ToolCall>)
@@ -286,6 +287,12 @@ class ChatController(
                 }
             }
 
+            override fun onUsage(prompt: Int, completion: Int, total: Int) {
+                scope.launch(Dispatchers.Main) {
+                    callbacks.onUsageUpdate(prompt, completion, total)
+                }
+            }
+
             override fun onComplete() {
                 scope.launch {
                     if (cancelRequested) return@launch
@@ -373,16 +380,16 @@ class ChatController(
                 return@launch
             }
             withContext(Dispatchers.Main) { callbacks.onStatusUpdate("Thinking...") }
+            
+            // Local usage estimation
+            val prompt = buildLocalPrompt(includeTools = false, forceFinal = false)
+            val promptTokens = estimateTokens(prompt)
+            launch(Dispatchers.Main) { callbacks.onUsageUpdate(promptTokens, 0, promptTokens) }
+
             val flow = when (resolved) {
-                MODEL_GEMINI_NANO -> geminiNano!!.generateContentStream(
-                    buildLocalPrompt(includeTools = false, forceFinal = false)
-                )
-                MODEL_MEDIAPIPE -> mediaPipeLlm!!.generateContentStream(
-                    buildLocalPrompt(includeTools = false, forceFinal = false)
-                )
-                MODEL_TFLITE -> localLlm!!.generateContentStream(
-                    buildLocalPrompt(includeTools = false, forceFinal = false)
-                )
+                MODEL_GEMINI_NANO -> geminiNano!!.generateContentStream(prompt)
+                MODEL_MEDIAPIPE -> mediaPipeLlm!!.generateContentStream(prompt)
+                MODEL_TFLITE -> localLlm!!.generateContentStream(prompt)
                 else -> {
                     withContext(Dispatchers.Main) {
                         callbacks.onError("Modelo local desconocido: $modelName", true)
@@ -395,8 +402,10 @@ class ChatController(
                 kotlinx.coroutines.withTimeout(LOCAL_INFERENCE_TIMEOUT_MS) {
                     flow.collect { chunk ->
                         fullResponse += chunk
+                        val compTokens = estimateTokens(fullResponse)
                         launch(Dispatchers.Main) {
                             callbacks.onResponseToken(chunk)
+                            callbacks.onUsageUpdate(promptTokens, compTokens, promptTokens + compTokens)
                         }
                     }
                 }
@@ -413,6 +422,11 @@ class ChatController(
                 }
             }
         }
+    }
+
+    private fun estimateTokens(text: String): Int {
+        // Very rough estimate: 4 chars per token
+        return (text.length / 4).coerceAtLeast(1)
     }
 
     private fun findLocalModelInfo(filename: String): ModelDownloadManager.ModelInfo? {
@@ -474,12 +488,19 @@ class ChatController(
     private fun runLocalInferenceWithTools(modelName: String, resolved: String, callbacks: Callbacks) {
         scope.launch(Dispatchers.IO) {
             val prompt = buildLocalPrompt(includeTools = true, forceFinal = false)
+            val promptTokens = estimateTokens(prompt)
+            launch(Dispatchers.Main) { callbacks.onUsageUpdate(promptTokens, 0, promptTokens) }
+
             val (firstResponse, toolCalls) = streamLocalFirstResponseWithTools(
                 resolved,
                 modelName,
                 prompt,
                 callbacks
             ) ?: return@launch
+            
+            val firstCompTokens = estimateTokens(firstResponse)
+            launch(Dispatchers.Main) { callbacks.onUsageUpdate(promptTokens, firstCompTokens, promptTokens + firstCompTokens) }
+
             if (toolCalls.isNullOrEmpty()) {
                 if (firstResponse.isNotBlank()) {
                     llmMessages.add(LlmMessage(role = "assistant", content = firstResponse))
@@ -506,6 +527,7 @@ class ChatController(
             }
 
             val finalPrompt = buildLocalPrompt(includeTools = true, forceFinal = true)
+            val finalPromptTokens = estimateTokens(finalPrompt)
             val finalResponse = streamLocalFinalResponse(
                 resolved,
                 modelName,
@@ -513,6 +535,10 @@ class ChatController(
                 callbacks
             )
                 ?: return@launch
+            
+            val finalCompTokens = estimateTokens(finalResponse)
+            launch(Dispatchers.Main) { callbacks.onUsageUpdate(finalPromptTokens, finalCompTokens, finalPromptTokens + finalCompTokens) }
+
             if (finalResponse.isNotBlank()) {
                 llmMessages.add(LlmMessage(role = "assistant", content = finalResponse))
             }
@@ -644,59 +670,6 @@ class ChatController(
         return buffer.toString()
     }
 
-    private suspend fun generateLocalContent(
-        resolved: String,
-        modelName: String,
-        prompt: String,
-        callbacks: Callbacks
-    ): String? {
-        return when (resolved) {
-            MODEL_GEMINI_NANO -> {
-                if (geminiNano == null || !geminiNano.isAvailable()) {
-                    withContext(Dispatchers.Main) { callbacks.onError("Gemini Nano (AICore) no disponible", true) }
-                    null
-                } else {
-                    geminiNano.generateContent(prompt).getOrElse {
-                        withContext(Dispatchers.Main) { callbacks.onError("Error: ${it.message}", true) }
-                        null
-                    }
-                }
-            }
-            MODEL_MEDIAPIPE -> {
-                if (mediaPipeLlm == null || !mediaPipeLlm.isAvailable()) {
-                    withContext(Dispatchers.Main) { callbacks.onError("MediaPipe LLM no disponible", true) }
-                    null
-                } else if (modelName != MODEL_MEDIAPIPE && mediaPipeLlm.getModelFilename() != modelName) {
-                    withContext(Dispatchers.Main) { callbacks.onError("Modelo MediaPipe no cargado: $modelName", true) }
-                    null
-                } else {
-                    mediaPipeLlm.generateContent(prompt).getOrElse {
-                        withContext(Dispatchers.Main) { callbacks.onError("Error: ${it.message}", true) }
-                        null
-                    }
-                }
-            }
-            MODEL_TFLITE -> {
-                if (localLlm == null || !localLlm.isAvailable()) {
-                    withContext(Dispatchers.Main) { callbacks.onError("LLM TFLite no disponible", true) }
-                    null
-                } else if (modelName != MODEL_TFLITE && localLlm.getModelFilename() != modelName) {
-                    withContext(Dispatchers.Main) { callbacks.onError("Modelo TFLite no cargado: $modelName", true) }
-                    null
-                } else {
-                    localLlm.generateContent(prompt).getOrElse {
-                        withContext(Dispatchers.Main) { callbacks.onError("Error: ${it.message}", true) }
-                        null
-                    }
-                }
-            }
-            else -> {
-                withContext(Dispatchers.Main) { callbacks.onError("Modelo local desconocido: $modelName", true) }
-                null
-            }
-        }
-    }
-
     private fun buildLocalPrompt(includeTools: Boolean, forceFinal: Boolean): String {
         val builder = StringBuilder()
         val tools = if (includeTools) toolRegistry.getTools() else emptyList()
@@ -818,13 +791,30 @@ class ChatController(
             } else {
                 results.add(executed)
             }
+
+            val toolTokens = estimateToolTokens(call, executed)
+            if (toolTokens > 0) {
+                val service = if (call.name.startsWith("mcp.")) "mcp" else "tools"
+                val modelKey = if (call.name.startsWith("mcp.")) {
+                    McpToolAdapter.parseToolName(call.name)?.serverName ?: "mcp"
+                } else {
+                    call.name
+                }
+                settingsManager.statsTotalToolTokens += toolTokens
+                settingsManager.recordTokenUsage(service, modelKey, toolTokens)
+            }
         }
         return results
     }
 
-    /**
-     * Returns list of available local models for the "local" endpoint.
-     */
+    private fun estimateToolTokens(call: ToolCall, result: ToolResult): Int {
+        val args = call.arguments
+        val output = result.output
+        val size = (args.length + output.length).coerceAtLeast(0)
+        if (size == 0) return 0
+        return (size / 4).coerceAtLeast(1)
+    }
+
     fun getAvailableLocalModels(): List<String> {
         val models = mutableListOf<String>()
         if (geminiNano != null && geminiNano.isAvailable()) {

@@ -33,6 +33,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import com.sbf.assistant.llm.LocalLlmService
 import com.sbf.assistant.llm.MediaPipeLlmService
@@ -79,16 +81,20 @@ class ChatActivity : AppCompatActivity() {
     private var sttMode: SttMode = SttMode.NONE
     private var activeSttConfig: ModelConfig? = null
     private var currentAssistantMessageIndex = -1
-    private var currentTokenCount = 0
+    private var currentPromptTokens = 0
+    private var currentCompletionTokens = 0
+    private var currentTotalTokens = 0
+    private var currentPromptEstimate = 0
     private var currentToolCount = 0
     private var currentToolNames: List<String> = emptyList()
     private var currentToolCallIds: List<String> = emptyList()
     private var autoScrollEnabled = true
     private var statusPrefix = "Ready"
-    private var lastRequestTokenCount = 0
     private var lastRequestElapsedMs = 0L
     private var lastRequestContextTokens = 0
     private var statusTickerJob: Job? = null
+    private var requestStartMs = 0L
+    private var suppressTtsForActiveResponse = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,6 +125,14 @@ class ChatActivity : AppCompatActivity() {
         settingsManager = SettingsManager(this)
         warmupManager = WarmupManager(this, settingsManager)
         ttsController = TtsController(this.applicationContext, settingsManager)
+        ttsController.setPlaybackStateListener { state ->
+            if (isRequestInFlight) return@setPlaybackStateListener
+            when (state) {
+                TtsController.PlaybackState.WAITING -> setStatus("Waiting for TTS", showProgress = true)
+                TtsController.PlaybackState.PLAYING -> setStatus("TTS Playing", showProgress = true)
+                TtsController.PlaybackState.IDLE -> setStatus("Ready", showProgress = false)
+            }
+        }
         permissionController = PermissionController(this)
         val localRuntime = LocalModelRuntime(this, settingsManager)
         val downloadManager = ModelDownloadManager(this)
@@ -157,7 +171,8 @@ class ChatActivity : AppCompatActivity() {
         chatAdapter = ChatAdapter(messages, this, 
             onCancelClick = { index -> cancelToolCallsFromUi(index) },
             onStatsClick = { index -> showStatsForMessage(index) },
-            onThoughtToggle = { index -> toggleThought(index) })
+            onThoughtToggle = { index -> toggleThought(index) },
+            onSpeakClick = { index -> speakMessageAt(index) })
         chatRecycler.adapter = chatAdapter
         chatRecycler.itemAnimator = null
         chatRecycler.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
@@ -208,7 +223,6 @@ class ChatActivity : AppCompatActivity() {
 
         micButton.setOnClickListener { handleMicClick() }
 
-        // Warmup LLM when user focuses input field
         inputField.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) warmupManager.warmupLlm()
         }
@@ -218,7 +232,6 @@ class ChatActivity : AppCompatActivity() {
         }
         btnCancelStt.setOnClickListener { cancelWhisper() }
 
-        // Check for updates
         updateChecker = UpdateChecker(this)
         checkForUpdates()
     }
@@ -240,7 +253,7 @@ class ChatActivity : AppCompatActivity() {
             return
         }
 
-        // Warmup STT when starting voice interaction
+        suppressTtsForActiveResponse = true
         warmupManager.warmupStt()
 
         val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
@@ -319,7 +332,8 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun startWhisperAuto(config: ModelConfig) {
-        ttsController.stop() // Detener reproducción al empezar a grabar
+        suppressTtsForActiveResponse = true
+        ttsController.stop()
         setStatus("Warming up STT", showProgress = true)
         scope.launch {
             if (config.endpointId == "local") {
@@ -328,12 +342,15 @@ class ChatActivity : AppCompatActivity() {
                     return@launch
                 }
             }
-            showSttUi(true, ptt = false)
+            showSttUi(true, ptt = false, readyToSpeak = false)
             val file = whisperController.startRecording(
                 usePcm = true,
                 autoStopOnSilence = true,
                 onSilenceDetected = { if (sttMode == SttMode.AUTO) stopWhisperAndTranscribe(config) },
-                onReadyToSpeak = { cueReadyToSpeak() },
+                onReadyToSpeak = {
+                    runOnUiThread { showSttUi(true, ptt = false, readyToSpeak = true) }
+                    cueReadyToSpeak()
+                },
                 onAmplitudeUpdate = { amp -> voiceVisualizer.addAmplitude(amp) }
             )
             if (file == null) {
@@ -348,7 +365,8 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun startWhisperPtt(config: ModelConfig) {
-        ttsController.stop() // Detener reproducción en PTT también
+        suppressTtsForActiveResponse = true
+        ttsController.stop()
         setStatus("Warming up STT", showProgress = true)
         scope.launch {
             if (config.endpointId == "local") {
@@ -357,9 +375,12 @@ class ChatActivity : AppCompatActivity() {
                     return@launch
                 }
             }
-            showSttUi(true, ptt = true)
+            showSttUi(true, ptt = true, readyToSpeak = false)
             val file = whisperController.startRecording(usePcm = true, autoStopOnSilence = false, 
-                onReadyToSpeak = { cueReadyToSpeak() },
+                onReadyToSpeak = {
+                    runOnUiThread { showSttUi(true, ptt = true, readyToSpeak = true) }
+                    cueReadyToSpeak()
+                },
                 onAmplitudeUpdate = { amp -> voiceVisualizer.addAmplitude(amp) })
             if (file == null) {
                 setStatus("STT error", showProgress = false)
@@ -385,12 +406,17 @@ class ChatActivity : AppCompatActivity() {
         sttMode = SttMode.NONE
         activeSttConfig = null
         showSttUi(false)
-        // Warmup LLM while STT is processing
         warmupManager.warmupLlm()
         whisperController.stopAndTranscribe(config) { text, error ->
             if (text != null) {
                 val processed = text.trim()
                 if (processed.isNotBlank()) {
+                    // Estimate STT tokens (approx 4 chars per token)
+                    val sttTokens = (processed.length / 4).coerceAtLeast(1)
+                    settingsManager.statsTotalSttTokens += sttTokens
+                    settingsManager.statsCountStt += 1
+                    settingsManager.recordTokenUsage("stt", resolveSttModelKey(config), sttTokens)
+                    
                     setStatus("Waiting for LLM", showProgress = true)
                     inputField.setText(processed)
                     processUserQuery(processed)
@@ -403,15 +429,23 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun showSttUi(recording: Boolean, ptt: Boolean = false) {
+    private fun showSttUi(recording: Boolean, ptt: Boolean = false, readyToSpeak: Boolean = true) {
         if (recording) {
-            voiceVisualizer.visibility = View.VISIBLE
-            voiceVisualizer.clear()
+            if (readyToSpeak) {
+                voiceVisualizer.visibility = View.VISIBLE
+                voiceVisualizer.clear()
+            } else {
+                voiceVisualizer.visibility = View.GONE
+            }
             if (ptt) {
                 sttButtonsContainer.visibility = View.GONE
                 normalInputContainer.visibility = View.VISIBLE
-                pttHint.visibility = View.VISIBLE
-                pttHint.text = "Desliza a la derecha para cancelar"
+                if (readyToSpeak) {
+                    pttHint.visibility = View.VISIBLE
+                    pttHint.text = "Desliza a la derecha para cancelar"
+                } else {
+                    pttHint.visibility = View.GONE
+                }
             } else {
                 sttButtonsContainer.visibility = View.VISIBLE
                 normalInputContainer.visibility = View.GONE
@@ -435,6 +469,7 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun startSystemListening() {
+        suppressTtsForActiveResponse = true
         ttsController.stop()
         if (speechRecognizer == null) speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -455,6 +490,10 @@ class ChatActivity : AppCompatActivity() {
                 results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { text ->
                     val processed = text.trim()
                     if (processed.isNotBlank()) {
+                        val sttTokens = (processed.length / 4).coerceAtLeast(1)
+                        settingsManager.statsTotalSttTokens += sttTokens
+                        settingsManager.statsCountStt += 1
+                        settingsManager.recordTokenUsage("stt", "system", sttTokens)
                         setStatus("Waiting for LLM", showProgress = true)
                         inputField.setText(processed)
                         processUserQuery(processed)
@@ -469,14 +508,48 @@ class ChatActivity : AppCompatActivity() {
         speechRecognizer?.startListening(intent)
     }
 
+    private fun resolveTtsModelKey(): String {
+        val config = settingsManager.getCategoryConfig(Category.TTS).primary
+        return if (config == null || config.endpointId == "system") {
+            "system"
+        } else {
+            config.modelName.ifBlank { "unknown" }
+        }
+    }
+
+    private fun resolveSttModelKey(config: ModelConfig): String {
+        return if (config.endpointId == "system") {
+            "system"
+        } else {
+            config.modelName.ifBlank { "unknown" }
+        }
+    }
+
+    private fun speakMessageAt(index: Int) {
+        val message = messages.getOrNull(index) ?: return
+        val text = message.text.trim()
+        if (text.isBlank()) return
+        suppressTtsForActiveResponse = false
+        val ttsTokens = (text.length / 4).coerceAtLeast(1)
+        settingsManager.statsTotalTtsTokens += ttsTokens
+        settingsManager.statsCountTts += 1
+        settingsManager.recordTokenUsage("tts", resolveTtsModelKey(), ttsTokens)
+        ttsController.stop()
+        ttsController.speak(text)
+    }
+
     private fun processUserQuery(query: String) {
+        suppressTtsForActiveResponse = false
         messages.add(ChatMessage(query, true))
         chatAdapter.notifyItemInserted(messages.size - 1)
         chatRecycler.scrollToPosition(messages.size - 1)
         historyStore.append(ChatMessage(query, true))
 
         currentAssistantMessageIndex = -1
-        currentTokenCount = 0
+        currentPromptTokens = 0
+        currentCompletionTokens = 0
+        currentTotalTokens = 0
+        currentPromptEstimate = estimatePromptTokens(query)
         currentToolCount = 0
         var fullResponse = ""
         var toolInProgress = false
@@ -486,7 +559,7 @@ class ChatActivity : AppCompatActivity() {
         val thinkFilter = ThinkFilter()
         var thoughtBuffer = ""
         isRequestInFlight = true
-        val requestStartMs = android.os.SystemClock.elapsedRealtime()
+        requestStartMs = android.os.SystemClock.elapsedRealtime()
         statusPrefix = "LLM thinking"
         setStatus("LLM thinking", showProgress = true)
         currentToolNames = emptyList()
@@ -519,12 +592,11 @@ class ChatActivity : AppCompatActivity() {
                 if (chunk.thoughtDelta.isNotEmpty()) thoughtBuffer += chunk.thoughtDelta
                 if (awaitingFirstResponse) { awaitingFirstResponse = false; setToolProgressVisible(false) }
                 if (toolInProgress) { toolInProgress = false; setToolProgressVisible(false) }
-                if (chunk.answerDelta.isNotEmpty()) currentTokenCount += (chunk.answerDelta.length / 4).coerceAtLeast(1)
-                if (settingsManager.ttsStreamOnTokens && settingsManager.ttsChunkOnPunctuation && chunk.answerDelta.isNotEmpty()) {
+                
+                if (!suppressTtsForActiveResponse && settingsManager.ttsStreamOnTokens && settingsManager.ttsChunkOnPunctuation && chunk.answerDelta.isNotEmpty()) {
                     ttsController.feedStreaming(chunk.answerDelta, false)
                 }
                 
-                lastRequestTokenCount = currentTokenCount
                 if (fullResponse.isEmpty() && currentAssistantMessageIndex == -1) {
                     fullResponse = chunk.answerDelta
                     val message = ChatMessage(
@@ -535,7 +607,7 @@ class ChatActivity : AppCompatActivity() {
                         toolNames = currentToolNames,
                         toolCallIds = currentToolCallIds,
                         showCancel = currentToolCallIds.isNotEmpty(),
-                        stats = ChatStats(currentToolCount, currentTokenCount)
+                        stats = buildCurrentStats()
                     )
                     messages.add(message)
                     currentAssistantMessageIndex = messages.size - 1
@@ -551,7 +623,7 @@ class ChatActivity : AppCompatActivity() {
                         toolNames = existing?.toolNames ?: currentToolNames,
                         toolCallIds = existing?.toolCallIds ?: currentToolCallIds,
                         showCancel = existing?.showCancel ?: currentToolCallIds.isNotEmpty(),
-                        stats = ChatStats(currentToolCount, currentTokenCount)
+                        stats = buildCurrentStats()
                     )
                     messages[currentAssistantMessageIndex] = updated
                     chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
@@ -560,12 +632,46 @@ class ChatActivity : AppCompatActivity() {
                 updateScrollToBottomVisibility()
             }
 
+            override fun onUsageUpdate(promptTokens: Int, completionTokens: Int, totalTokens: Int) {
+                currentPromptTokens = promptTokens
+                currentCompletionTokens = completionTokens
+                currentTotalTokens = totalTokens
+                lastRequestContextTokens = promptTokens
+                if (currentAssistantMessageIndex != -1) {
+                    val existing = messages[currentAssistantMessageIndex]
+                    messages[currentAssistantMessageIndex] = existing.copy(stats = buildCurrentStats())
+                    chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
+                }
+            }
+
             override fun onResponseComplete(fullResponse: String) {
                 val cleaned = thinkFilter.stripAll(fullResponse).trim()
                 isRequestInFlight = false
                 statusTickerJob?.cancel()
                 setToolProgressVisible(false)
-                if (settingsManager.ttsStreamOnTokens && settingsManager.ttsChunkOnPunctuation) {
+
+                if (currentPromptTokens == 0) {
+                    currentPromptTokens = currentPromptEstimate
+                    lastRequestContextTokens = currentPromptTokens
+                }
+                if (currentCompletionTokens == 0 && cleaned.isNotEmpty()) {
+                    currentCompletionTokens = estimateCompletionTokens(cleaned)
+                }
+                if (currentTotalTokens == 0) {
+                    currentTotalTokens = currentPromptTokens + currentCompletionTokens
+                }
+                
+                // Update global stats
+                settingsManager.statsTotalLlmPromptTokens += currentPromptTokens
+                settingsManager.statsTotalLlmCompTokens += currentCompletionTokens
+                settingsManager.statsCountLlm += 1
+                settingsManager.recordTokenUsage(
+                    "llm",
+                    settingsManager.getCategoryConfig(Category.AGENT).primary?.modelName ?: "unknown",
+                    currentTotalTokens
+                )
+
+                if (!suppressTtsForActiveResponse && settingsManager.ttsStreamOnTokens && settingsManager.ttsChunkOnPunctuation) {
                     setStatus("Waiting for TTS", showProgress = true)
                     ttsController.feedStreaming("", true)
                 }
@@ -580,7 +686,7 @@ class ChatActivity : AppCompatActivity() {
                         toolNames = existing?.toolNames ?: currentToolNames,
                         toolCallIds = existing?.toolCallIds ?: currentToolCallIds,
                         showCancel = false,
-                        stats = ChatStats(currentToolCount, currentTokenCount)
+                        stats = buildCurrentStats()
                     )
                     if (currentAssistantMessageIndex != -1) {
                         messages[currentAssistantMessageIndex] = updated
@@ -590,14 +696,27 @@ class ChatActivity : AppCompatActivity() {
                         chatAdapter.notifyItemInserted(messages.size - 1)
                     }
                     historyStore.append(ChatMessage(cleaned, false))
-                    if (!(settingsManager.ttsStreamOnTokens && settingsManager.ttsChunkOnPunctuation)) {
+                    if (!suppressTtsForActiveResponse && !(settingsManager.ttsStreamOnTokens && settingsManager.ttsChunkOnPunctuation)) {
                         setStatus("Waiting for TTS", showProgress = true)
-                        ttsController.speak(cleaned) { setStatus("Ready", showProgress = false) }
-                    } else {
-                        // Streaming TTS finalization handled by feedStreaming completion.
+                        val ttsModel = resolveTtsModelKey()
+                        ttsController.speak(cleaned) { 
+                            // Estimate TTS tokens
+                            val ttsTokens = (cleaned.length / 4).coerceAtLeast(1)
+                            settingsManager.statsTotalTtsTokens += ttsTokens
+                            settingsManager.statsCountTts += 1
+                            settingsManager.recordTokenUsage("tts", ttsModel, ttsTokens)
+                            setStatus("Ready", showProgress = false) 
+                        }
+                    } else if (!suppressTtsForActiveResponse) {
+                        val ttsTokens = (cleaned.length / 4).coerceAtLeast(1)
+                        settingsManager.statsTotalTtsTokens += ttsTokens
+                        settingsManager.statsCountTts += 1
+                        settingsManager.recordTokenUsage("tts", resolveTtsModelKey(), ttsTokens)
                     }
                 }
-                chatRecycler.postDelayed({ if (!isRequestInFlight) setStatus("Ready", showProgress = false) }, 1200)
+                if (!ttsController.enabled) {
+                    chatRecycler.postDelayed({ if (!isRequestInFlight) setStatus("Ready", showProgress = false) }, 1200)
+                }
                 updateSendButtonState(false)
                 updateScrollToBottomVisibility()
             }
@@ -608,7 +727,9 @@ class ChatActivity : AppCompatActivity() {
                 setToolProgressVisible(true)
             }
             override fun onToolCalls(toolCalls: List<ToolCall>) {
-                currentToolCount = toolCalls.size
+                currentToolCount += toolCalls.size
+                settingsManager.statsTotalToolCalls += toolCalls.size
+                settingsManager.statsCountTools += toolCalls.size
                 currentToolNames = toolCalls.map { it.name }
                 currentToolCallIds = toolCalls.map { it.id }
                 val placeholderText = if (toolCalls.isNotEmpty()) "Ejecutando tools..." else ""
@@ -623,7 +744,7 @@ class ChatActivity : AppCompatActivity() {
                         toolNames = currentToolNames,
                         toolCallIds = currentToolCallIds,
                         showCancel = currentToolCallIds.isNotEmpty(),
-                        stats = ChatStats(currentToolCount, currentTokenCount)
+                        stats = buildCurrentStats()
                     )
                     messages.add(message)
                     currentAssistantMessageIndex = messages.size - 1
@@ -635,7 +756,7 @@ class ChatActivity : AppCompatActivity() {
                         toolNames = currentToolNames,
                         toolCallIds = currentToolCallIds,
                         showCancel = currentToolCallIds.isNotEmpty(),
-                        stats = ChatStats(currentToolCount, currentTokenCount)
+                        stats = buildCurrentStats()
                     )
                     messages[currentAssistantMessageIndex] = updated
                     chatAdapter.notifyItemChanged(currentAssistantMessageIndex)
@@ -643,11 +764,12 @@ class ChatActivity : AppCompatActivity() {
             }
             override fun onError(error: String, wasPrimary: Boolean) {
                 isRequestInFlight = false
+                statusTickerJob?.cancel()
                 setStatus("Ready", showProgress = false)
                 setToolProgressVisible(false)
                 updateSendButtonState(false)
                 val notice = "Request failed: $error"
-                val message = ChatMessage(text = notice, isUser = false, isThinking = false, stats = ChatStats(currentToolCount, currentTokenCount))
+                val message = ChatMessage(text = notice, isUser = false, isThinking = false, stats = buildCurrentStats())
                 messages.add(message)
                 chatAdapter.notifyItemInserted(messages.size - 1)
                 if (autoScrollEnabled) {
@@ -660,6 +782,35 @@ class ChatActivity : AppCompatActivity() {
             }
         }, source = "chat")
         updateSendButtonState(true)
+    }
+
+    private fun buildCurrentStats(): ChatStats {
+        val config = settingsManager.getCategoryConfig(Category.AGENT).primary
+        return ChatStats(
+            toolCount = currentToolCount,
+            promptTokens = currentPromptTokens,
+            completionTokens = currentCompletionTokens,
+            totalTokens = currentTotalTokens,
+            durationMs = if (requestStartMs > 0) android.os.SystemClock.elapsedRealtime() - requestStartMs else 0L,
+            model = config?.modelName ?: ""
+        )
+    }
+
+    private fun estimatePromptTokens(query: String): Int {
+        val prefix = settingsManager.agentUserPromptPrefix.trim()
+        val resolvedPrefix = if (prefix.isNotBlank() && settingsManager.agentUserPromptPrefixVarsEnabled) {
+            val now = java.text.SimpleDateFormat("EEE d/M/yy H:mm", java.util.Locale.getDefault())
+                .format(java.util.Date())
+            prefix.replace("\$source", "chat").replace("\$now", now)
+        } else {
+            prefix
+        }
+        val text = if (resolvedPrefix.isBlank()) query else "$resolvedPrefix\n$query"
+        return (text.length / 4).coerceAtLeast(1)
+    }
+
+    private fun estimateCompletionTokens(text: String): Int {
+        return (text.length / 4).coerceAtLeast(1)
     }
 
     private fun setStatus(prefix: String, showProgress: Boolean) {
@@ -676,9 +827,9 @@ class ChatActivity : AppCompatActivity() {
     private fun formatStatus(prefix: String, elapsedMs: Long?): String {
         return if (elapsedMs != null) {
             val seconds = elapsedMs / 1000.0
-            String.format(Locale.US, "%s (%.1fs, %d tok, %d ctx)", prefix, seconds, lastRequestTokenCount, lastRequestContextTokens)
+            String.format(Locale.US, "%s (%.1fs, %d resp tok, %d ctx)", prefix, seconds, currentCompletionTokens, lastRequestContextTokens)
         } else {
-            String.format(Locale.US, "%s (%d tok, %d ctx)", prefix, lastRequestTokenCount, lastRequestContextTokens)
+            String.format(Locale.US, "%s (%d resp tok, %d ctx)", prefix, currentCompletionTokens, lastRequestContextTokens)
         }
     }
 
@@ -714,7 +865,6 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Refresh MCP client to pick up new servers added in settings
         mcpClient = McpServerFactory.createClient(this.applicationContext, settingsManager)
         toolRegistry = ToolRegistry(settingsManager, mcpClient)
         toolExecutor = ToolExecutor(this.applicationContext, mcpClient)
@@ -812,7 +962,7 @@ class ChatActivity : AppCompatActivity() {
             text = text,
             isUser = false,
             isThinking = false,
-            stats = ChatStats(currentToolCount, currentTokenCount)
+            stats = buildCurrentStats()
         )
         messages.add(message)
         chatAdapter.notifyItemInserted(messages.size - 1)
@@ -824,7 +974,15 @@ class ChatActivity : AppCompatActivity() {
 
     private fun showStatsForMessage(index: Int) {
         messages.getOrNull(index)?.stats?.let { stats ->
-            AlertDialog.Builder(this).setTitle("Estadisticas").setMessage("Tools: ${stats.toolCount}\nTokens: ${stats.tokenCount}").setPositiveButton("OK", null).show()
+            val msg = StringBuilder()
+            msg.append("Modelo: ${stats.model}\n")
+            msg.append("Tiempo: ${stats.durationMs / 1000.0}s\n")
+            msg.append("Prompt tokens: ${stats.promptTokens}\n")
+            msg.append("Completion tokens: ${stats.completionTokens}\n")
+            msg.append("Total tokens: ${stats.totalTokens}\n")
+            msg.append("Tools: ${stats.toolCount}")
+            
+            AlertDialog.Builder(this).setTitle("Estadísticas").setMessage(msg.toString()).setPositiveButton("OK", null).show()
         }
     }
 

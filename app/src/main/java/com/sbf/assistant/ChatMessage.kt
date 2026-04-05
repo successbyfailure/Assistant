@@ -2,7 +2,11 @@ package com.sbf.assistant
 
 data class ChatStats(
     val toolCount: Int = 0,
-    val tokenCount: Int = 0
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+    val totalTokens: Int = 0,
+    val durationMs: Long = 0,
+    val model: String = ""
 )
 
 data class ChatMessage(

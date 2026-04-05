@@ -43,6 +43,7 @@ El cliente solo adjunta tools al request si el tipo de endpoint soporta function
 #### 🔄 Sistema de Agentes y Sub-agentes
 - **Agentes Especializados**: Diferenciar el agente del **Overlay** (rápido, orientado a sistema) del agente del **Chat** (razonamiento profundo, herramientas complejas).
 - **Orquestador**: Implementar un sistema donde un agente "Padre" analiza la intención y delega a sub-agentes específicos (Domótica, Comunicación, MCP).
+- **Project Assistant (externo)**: Proyecto independiente con plan y features en `PROJECT_ASSISTANT_PLAN.md`. El Android Assistant es un cliente de integración.
 
 #### 🛠 Feedback y Desarrollo Comunitario
 - **GitHub Integration**:

@@ -283,9 +283,144 @@ class SettingsManager(context: Context) {
         get() = prefs.getString("voice_shortcut_phrase", "") ?: ""
         set(value) = prefs.edit().putString("voice_shortcut_phrase", value).apply()
 
+    var autoConversationEnabled: Boolean
+        get() = prefs.getBoolean("auto_conversation_enabled", true)
+        set(value) = prefs.edit().putBoolean("auto_conversation_enabled", value).apply()
+
+    var autoConversationTimeoutMs: Long
+        get() = prefs.getLong("auto_conversation_timeout_ms", 8_000L)
+        set(value) = prefs.edit().putLong("auto_conversation_timeout_ms", value).apply()
+
     var toolTimeoutMs: Long
         get() = prefs.getLong("tool_timeout_ms", 10_000L)
         set(value) = prefs.edit().putLong("tool_timeout_ms", value).apply()
+
+    var statsTotalSttTokens: Int
+        get() = prefs.getInt("stats_total_stt_tokens", 0)
+        set(value) = prefs.edit().putInt("stats_total_stt_tokens", value).apply()
+
+    var statsTotalTtsTokens: Int
+        get() = prefs.getInt("stats_total_tts_tokens", 0)
+        set(value) = prefs.edit().putInt("stats_total_tts_tokens", value).apply()
+
+    var statsTotalLlmPromptTokens: Int
+        get() = prefs.getInt("stats_total_llm_prompt_tokens", 0)
+        set(value) = prefs.edit().putInt("stats_total_llm_prompt_tokens", value).apply()
+
+    var statsTotalLlmCompTokens: Int
+        get() = prefs.getInt("stats_total_llm_comp_tokens", 0)
+        set(value) = prefs.edit().putInt("stats_total_llm_comp_tokens", value).apply()
+
+    var statsTotalToolCalls: Int
+        get() = prefs.getInt("stats_total_tool_calls", 0)
+        set(value) = prefs.edit().putInt("stats_total_tool_calls", value).apply()
+
+    var statsTotalToolTokens: Int
+        get() = prefs.getInt("stats_total_tool_tokens", 0)
+        set(value) = prefs.edit().putInt("stats_total_tool_tokens", value).apply()
+
+    var statsCountLlm: Int
+        get() = prefs.getInt("stats_count_llm", 0)
+        set(value) = prefs.edit().putInt("stats_count_llm", value).apply()
+
+    var statsCountStt: Int
+        get() = prefs.getInt("stats_count_stt", 0)
+        set(value) = prefs.edit().putInt("stats_count_stt", value).apply()
+
+    var statsCountTts: Int
+        get() = prefs.getInt("stats_count_tts", 0)
+        set(value) = prefs.edit().putInt("stats_count_tts", value).apply()
+
+    var statsCountTools: Int
+        get() = prefs.getInt("stats_count_tools", 0)
+        set(value) = prefs.edit().putInt("stats_count_tools", value).apply()
+
+    fun clearStats() {
+        prefs.edit().apply {
+            putInt("stats_total_stt_tokens", 0)
+            putInt("stats_total_tts_tokens", 0)
+            putInt("stats_total_llm_prompt_tokens", 0)
+            putInt("stats_total_llm_comp_tokens", 0)
+            putInt("stats_total_tool_calls", 0)
+            putInt("stats_total_tool_tokens", 0)
+            putInt("stats_count_llm", 0)
+            putInt("stats_count_stt", 0)
+            putInt("stats_count_tts", 0)
+            putInt("stats_count_tools", 0)
+            putString("stats_tokens_by_service", null)
+            putString("stats_tokens_by_model", null)
+            putString("stats_tokens_by_day", null)
+        }.apply()
+    }
+
+    fun recordTokenUsage(service: String, model: String?, tokens: Int) {
+        if (tokens <= 0) return
+        val serviceKey = service.trim().lowercase()
+        val now = java.time.LocalDate.now()
+        val dateKey = now.toString()
+
+        val byService = readIntMap("stats_tokens_by_service")
+        byService[serviceKey] = (byService[serviceKey] ?: 0) + tokens
+        writeIntMap("stats_tokens_by_service", byService)
+
+        if (!model.isNullOrBlank()) {
+            val byModel = readIntMap("stats_tokens_by_model")
+            val modelKey = "${serviceKey}:${model.trim()}"
+            byModel[modelKey] = (byModel[modelKey] ?: 0) + tokens
+            writeIntMap("stats_tokens_by_model", byModel)
+        }
+
+        val byDay = readIntMap("stats_tokens_by_day")
+        byDay[dateKey] = (byDay[dateKey] ?: 0) + tokens
+        pruneDays(byDay)
+        writeIntMap("stats_tokens_by_day", byDay)
+    }
+
+    fun getTokenUsageByService(): Map<String, Int> {
+        return readIntMap("stats_tokens_by_service")
+    }
+
+    fun getTokenUsageByModel(): Map<String, Int> {
+        return readIntMap("stats_tokens_by_model")
+    }
+
+    fun getTokenUsageByDay(): Map<String, Int> {
+        return readIntMap("stats_tokens_by_day")
+    }
+
+    private fun pruneDays(map: MutableMap<String, Int>) {
+        val today = java.time.LocalDate.now()
+        val keep = (0..6).map { today.minusDays(it.toLong()).toString() }.toSet()
+        val iterator = map.keys.iterator()
+        while (iterator.hasNext()) {
+            val key = iterator.next()
+            if (key !in keep) {
+                iterator.remove()
+            }
+        }
+    }
+
+    private fun readIntMap(key: String): MutableMap<String, Int> {
+        val json = prefs.getString(key, null) ?: return mutableMapOf()
+        val obj = try {
+            org.json.JSONObject(json)
+        } catch (e: Exception) {
+            return mutableMapOf()
+        }
+        val map = mutableMapOf<String, Int>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            map[k] = obj.optInt(k, 0)
+        }
+        return map
+    }
+
+    private fun writeIntMap(key: String, map: Map<String, Int>) {
+        val obj = org.json.JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString(key, obj.toString()).apply()
+    }
 
     private fun getDefaultMcpServers(): List<McpServerConfig> {
         return listOf(

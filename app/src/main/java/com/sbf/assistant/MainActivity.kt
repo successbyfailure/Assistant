@@ -125,6 +125,7 @@ class MainActivity : AppCompatActivity() {
 
         setupToolSettings()
         setupPromptSettings()
+        setupStatsSection()
         setupThemeSettings()
         setupMcpSettings()
         setupLocalSettings()
@@ -156,6 +157,7 @@ class MainActivity : AppCompatActivity() {
         tabLayout.addTab(tabLayout.newTab().setText("Categorias"))
         tabLayout.addTab(tabLayout.newTab().setText("Tools"))
         tabLayout.addTab(tabLayout.newTab().setText("Prompts"))
+        tabLayout.addTab(tabLayout.newTab().setText("Estadisticas"))
         tabLayout.addTab(tabLayout.newTab().setText("Apariencia"))
         tabLayout.addTab(tabLayout.newTab().setText("MCP"))
         tabLayout.addTab(tabLayout.newTab().setText("Local"))
@@ -177,10 +179,14 @@ class MainActivity : AppCompatActivity() {
         binding.sectionCategories.visibility = if (index == 1) View.VISIBLE else View.GONE
         binding.sectionTools.visibility = if (index == 2) View.VISIBLE else View.GONE
         binding.sectionPrompts.visibility = if (index == 3) View.VISIBLE else View.GONE
-        binding.sectionAppearance.visibility = if (index == 4) View.VISIBLE else View.GONE
-        binding.sectionMcp.visibility = if (index == 5) View.VISIBLE else View.GONE
-        binding.sectionLocal.visibility = if (index == 6) View.VISIBLE else View.GONE
-        binding.sectionModelManager.visibility = if (index == 7) View.VISIBLE else View.GONE
+        binding.sectionStats.visibility = if (index == 4) View.VISIBLE else View.GONE
+        binding.sectionAppearance.visibility = if (index == 5) View.VISIBLE else View.GONE
+        binding.sectionMcp.visibility = if (index == 6) View.VISIBLE else View.GONE
+        binding.sectionLocal.visibility = if (index == 7) View.VISIBLE else View.GONE
+        binding.sectionModelManager.visibility = if (index == 8) View.VISIBLE else View.GONE
+        if (index == 4) {
+            updateStatsSection()
+        }
     }
 
     private fun setupThemeSettings() {
@@ -319,6 +325,9 @@ class MainActivity : AppCompatActivity() {
         binding.swUserPrefixVars.isChecked = settingsManager.agentUserPromptPrefixVarsEnabled
         binding.tvUserPrefixHelp.visibility = if (binding.swUserPrefixVars.isChecked) View.VISIBLE else View.GONE
         binding.swVoiceShortcut.isChecked = settingsManager.voiceShortcutEnabled
+        binding.swAutoConversation.isChecked = settingsManager.autoConversationEnabled
+        binding.etAutoConversationTimeout.setText(settingsManager.autoConversationTimeoutMs.toString())
+        binding.tilAutoConversationTimeout.visibility = if (binding.swAutoConversation.isChecked) View.VISIBLE else View.GONE
         binding.swTtsChunk.isChecked = settingsManager.ttsChunkOnPunctuation
         binding.swTtsStream.isChecked = settingsManager.ttsStreamOnTokens
         binding.etTtsSeparators.setText(settingsManager.ttsChunkSeparators)
@@ -338,6 +347,16 @@ class MainActivity : AppCompatActivity() {
         binding.swVoiceShortcut.setOnCheckedChangeListener { _, isChecked ->
             settingsManager.voiceShortcutEnabled = isChecked
             binding.etVoiceShortcut.isEnabled = isChecked
+        }
+        binding.swAutoConversation.setOnCheckedChangeListener { _, isChecked ->
+            settingsManager.autoConversationEnabled = isChecked
+            binding.tilAutoConversationTimeout.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+        binding.etAutoConversationTimeout.doAfterTextChanged { text ->
+            val value = text?.toString()?.toLongOrNull()
+            if (value != null && value > 0) {
+                settingsManager.autoConversationTimeoutMs = value
+            }
         }
         binding.swUserPrefixVars.setOnCheckedChangeListener { _, isChecked ->
             settingsManager.agentUserPromptPrefixVarsEnabled = isChecked
@@ -363,6 +382,121 @@ class MainActivity : AppCompatActivity() {
         }
         binding.etVoiceShortcut.doAfterTextChanged { text ->
             settingsManager.voiceShortcutPhrase = text?.toString().orEmpty().trim()
+        }
+    }
+
+    private fun setupStatsSection() {
+        binding.btnClearStats.setOnClickListener {
+            settingsManager.clearStats()
+            updateStatsSection()
+            Toast.makeText(this, "Estadisticas reiniciadas", Toast.LENGTH_SHORT).show()
+        }
+        updateStatsSection()
+    }
+
+    private fun updateStatsSection() {
+        val sttTokens = settingsManager.statsTotalSttTokens
+        val ttsTokens = settingsManager.statsTotalTtsTokens
+        val llmPromptTokens = settingsManager.statsTotalLlmPromptTokens
+        val llmCompTokens = settingsManager.statsTotalLlmCompTokens
+        val llmTotalTokens = llmPromptTokens + llmCompTokens
+        val toolTokens = settingsManager.statsTotalToolTokens
+        val totalTokens = sttTokens + ttsTokens + llmTotalTokens + toolTokens
+
+        binding.tvStatsTotalTokens.text = totalTokens.toString()
+        binding.tvStatsToolsTokens.text = toolTokens.toString()
+        binding.tvStatsLlmTokens.text = "Tokens: prompt=$llmPromptTokens, completion=$llmCompTokens, total=$llmTotalTokens"
+        binding.tvStatsLlmCalls.text = "Llamadas: ${settingsManager.statsCountLlm}"
+        binding.tvStatsSttTokens.text = "Tokens: $sttTokens"
+        binding.tvStatsSttCalls.text = "Llamadas: ${settingsManager.statsCountStt}"
+        binding.tvStatsTtsTokens.text = "Tokens: $ttsTokens"
+        binding.tvStatsTtsCalls.text = "Llamadas: ${settingsManager.statsCountTts}"
+        binding.tvStatsToolsCalls.text = "Llamadas: ${settingsManager.statsCountTools} (total tools: ${settingsManager.statsTotalToolCalls})"
+
+        updateTokenDistributionChart()
+        updateModelBreakdown()
+        updateWeeklyChart()
+    }
+
+    private fun updateTokenDistributionChart() {
+        val serviceTokens = settingsManager.getTokenUsageByService()
+        val llm = serviceTokens["llm"] ?: 0
+        val stt = serviceTokens["stt"] ?: 0
+        val tts = serviceTokens["tts"] ?: 0
+        val tools = serviceTokens["tools"] ?: 0
+        val mcp = serviceTokens["mcp"] ?: 0
+        val total = llm + stt + tts + tools + mcp
+
+        if (total <= 0) {
+            binding.tvStatsDistributionEmpty.visibility = View.VISIBLE
+            binding.chartTokensDistribution.visibility = View.GONE
+            return
+        }
+        binding.tvStatsDistributionEmpty.visibility = View.GONE
+        binding.chartTokensDistribution.visibility = View.VISIBLE
+
+        val bars = listOf(
+            binding.barDistLlm to llm,
+            binding.barDistStt to stt,
+            binding.barDistTts to tts,
+            binding.barDistTools to tools,
+            binding.barDistMcp to mcp
+        )
+        bars.forEach { (view, tokens) ->
+            val params = view.layoutParams as LinearLayout.LayoutParams
+            params.weight = tokens.toFloat().coerceAtLeast(0.5f)
+            view.layoutParams = params
+        }
+
+        val llmColor = com.google.android.material.color.MaterialColors.getColor(binding.barDistLlm, com.google.android.material.R.attr.colorPrimary)
+        val sttColor = com.google.android.material.color.MaterialColors.getColor(binding.barDistStt, com.google.android.material.R.attr.colorSecondary)
+        val ttsColor = com.google.android.material.color.MaterialColors.getColor(binding.barDistTts, com.google.android.material.R.attr.colorTertiary)
+        val toolsColor = com.google.android.material.color.MaterialColors.getColor(binding.barDistTools, com.google.android.material.R.attr.colorSurfaceVariant)
+        val mcpColor = com.google.android.material.color.MaterialColors.getColor(binding.barDistMcp, com.google.android.material.R.attr.colorPrimaryContainer)
+
+        binding.barDistLlm.setBackgroundColor(llmColor)
+        binding.barDistStt.setBackgroundColor(sttColor)
+        binding.barDistTts.setBackgroundColor(ttsColor)
+        binding.barDistTools.setBackgroundColor(toolsColor)
+        binding.barDistMcp.setBackgroundColor(mcpColor)
+    }
+
+    private fun updateModelBreakdown() {
+        val modelTokens = settingsManager.getTokenUsageByModel()
+            .toList()
+            .sortedByDescending { it.second }
+            .take(8)
+        binding.tvStatsModelBreakdown.text = if (modelTokens.isEmpty()) {
+            "Sin datos"
+        } else {
+            modelTokens.joinToString("\n") { (key, value) -> "$key: $value" }
+        }
+    }
+
+    private fun updateWeeklyChart() {
+        val dayTokens = settingsManager.getTokenUsageByDay()
+        val today = java.time.LocalDate.now()
+        val days = (6 downTo 0).map { today.minusDays(it.toLong()) }
+        val values = days.map { dayTokens[it.toString()] ?: 0 }
+        val max = values.maxOrNull()?.coerceAtLeast(1) ?: 1
+        val barViews = listOf(
+            binding.barDay0Fill, binding.barDay1Fill, binding.barDay2Fill,
+            binding.barDay3Fill, binding.barDay4Fill, binding.barDay5Fill, binding.barDay6Fill
+        )
+        val labelViews = listOf(
+            binding.barDay0Label, binding.barDay1Label, binding.barDay2Label,
+            binding.barDay3Label, binding.barDay4Label, binding.barDay5Label, binding.barDay6Label
+        )
+        val barColor = com.google.android.material.color.MaterialColors.getColor(binding.barDay0Fill, com.google.android.material.R.attr.colorPrimary)
+        val maxHeightPx = (56 * resources.displayMetrics.density).toInt()
+        days.forEachIndexed { index, day ->
+            val value = values[index]
+            val height = ((value.toFloat() / max.toFloat()) * maxHeightPx).toInt().coerceAtLeast(4)
+            val params = barViews[index].layoutParams
+            params.height = height
+            barViews[index].layoutParams = params
+            barViews[index].setBackgroundColor(barColor)
+            labelViews[index].text = day.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault())
         }
     }
 

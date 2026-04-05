@@ -15,7 +15,8 @@ class ChatAdapter(
     context: Context,
     private val onCancelClick: (Int) -> Unit,
     private val onStatsClick: (Int) -> Unit,
-    private val onThoughtToggle: (Int) -> Unit
+    private val onThoughtToggle: (Int) -> Unit,
+    private val onSpeakClick: (Int) -> Unit
 ) : RecyclerView.Adapter<ChatAdapter.ViewHolder>() {
 
     private val markwon = Markwon.create(context)
@@ -24,6 +25,7 @@ class ChatAdapter(
         val tvMessage: TextView = view.findViewById(R.id.tv_message)
         val tvTools: TextView? = view.findViewById(R.id.tv_tools)
         val btnCancel: MaterialButton? = view.findViewById(R.id.btn_cancel)
+        val btnTts: MaterialButton? = view.findViewById(R.id.btn_tts)
         val ivStats: ImageView? = view.findViewById(R.id.iv_stats)
         val cardThought: View? = view.findViewById(R.id.card_thought)
         val tvThought: TextView? = view.findViewById(R.id.tv_thought)
@@ -47,6 +49,15 @@ class ChatAdapter(
             holder.tvTools?.visibility = View.GONE
             holder.btnCancel?.visibility = View.GONE
             holder.ivStats?.visibility = View.GONE
+            holder.btnTts?.apply {
+                visibility = if (message.text.isNotBlank()) View.VISIBLE else View.GONE
+                setOnClickListener {
+                    val pos = holder.adapterPosition
+                    if (pos != RecyclerView.NO_POSITION) {
+                        onSpeakClick(pos)
+                    }
+                }
+            }
         } else {
             markwon.setMarkdown(holder.tvMessage, message.text)
             holder.cardThought?.let { card ->
@@ -91,6 +102,15 @@ class ChatAdapter(
                     val pos = holder.adapterPosition
                     if (pos != RecyclerView.NO_POSITION) {
                         onCancelClick(pos)
+                    }
+                }
+            }
+            holder.btnTts?.apply {
+                visibility = if (!message.isThinking && message.text.isNotBlank()) View.VISIBLE else View.GONE
+                setOnClickListener {
+                    val pos = holder.adapterPosition
+                    if (pos != RecyclerView.NO_POSITION) {
+                        onSpeakClick(pos)
                     }
                 }
             }
