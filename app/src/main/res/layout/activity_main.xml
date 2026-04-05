@@ -488,6 +488,43 @@
                     android:layout_marginTop="8dp" />
 
                 <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_tts_voice"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="Voz TTS">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/ac_tts_voice"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/til_tts_response_format"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="Formato respuesta TTS">
+
+                    <AutoCompleteTextView
+                        android:id="@+id/ac_tts_response_format"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/sw_force_wav_remote"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Forzar WAV para STT remoto"
+                    android:layout_marginTop="8dp" />
+
+                <com.google.android.material.textfield.TextInputLayout
                     android:id="@+id/til_tts_separators"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

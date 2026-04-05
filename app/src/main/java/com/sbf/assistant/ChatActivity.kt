@@ -333,7 +333,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun startWhisperAuto(config: ModelConfig) {
         suppressTtsForActiveResponse = true
-        ttsController.stop()
+        interruptTtsPlayback()
         setStatus("Warming up STT", showProgress = true)
         scope.launch {
             if (config.endpointId == "local") {
@@ -343,8 +343,9 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
             showSttUi(true, ptt = false, readyToSpeak = false)
+            val usePcm = config.endpointId == "local" || settingsManager.forceWavForRemote
             val file = whisperController.startRecording(
-                usePcm = true,
+                usePcm = usePcm,
                 autoStopOnSilence = true,
                 onSilenceDetected = { if (sttMode == SttMode.AUTO) stopWhisperAndTranscribe(config) },
                 onReadyToSpeak = {
@@ -366,7 +367,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun startWhisperPtt(config: ModelConfig) {
         suppressTtsForActiveResponse = true
-        ttsController.stop()
+        interruptTtsPlayback()
         setStatus("Warming up STT", showProgress = true)
         scope.launch {
             if (config.endpointId == "local") {
@@ -376,7 +377,8 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
             showSttUi(true, ptt = true, readyToSpeak = false)
-            val file = whisperController.startRecording(usePcm = true, autoStopOnSilence = false, 
+            val usePcm = config.endpointId == "local" || settingsManager.forceWavForRemote
+            val file = whisperController.startRecording(usePcm = usePcm, autoStopOnSilence = false, 
                 onReadyToSpeak = {
                     runOnUiThread { showSttUi(true, ptt = true, readyToSpeak = true) }
                     cueReadyToSpeak()
@@ -470,7 +472,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun startSystemListening() {
         suppressTtsForActiveResponse = true
-        ttsController.stop()
+        interruptTtsPlayback()
         if (speechRecognizer == null) speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -534,7 +536,7 @@ class ChatActivity : AppCompatActivity() {
         settingsManager.statsTotalTtsTokens += ttsTokens
         settingsManager.statsCountTts += 1
         settingsManager.recordTokenUsage("tts", resolveTtsModelKey(), ttsTokens)
-        ttsController.stop()
+        interruptTtsPlayback()
         ttsController.speak(text)
     }
 
@@ -937,6 +939,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun cancelRequestFromUi() {
         chatController.cancelCurrentRequest()
+        interruptTtsPlayback()
         isRequestInFlight = false
         statusTickerJob?.cancel()
         statusText.text = "Ready"
@@ -995,6 +998,11 @@ class ChatActivity : AppCompatActivity() {
 
     private fun updateSendButtonState(inFlight: Boolean) {
         sendButton.setImageResource(if (inFlight) android.R.drawable.ic_menu_close_clear_cancel else android.R.drawable.ic_menu_send)
+    }
+
+    private fun interruptTtsPlayback() {
+        ttsController.clearQueue()
+        ttsController.stop()
     }
 
     private enum class SttMode { NONE, AUTO, PTT }

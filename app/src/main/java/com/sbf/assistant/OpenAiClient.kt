@@ -127,7 +127,13 @@ class OpenAiClient(private val endpoint: Endpoint) {
         })
     }
 
-    fun generateSpeech(text: String, modelName: String, callback: (File?, Int, Throwable?) -> Unit) {
+    fun generateSpeech(
+        text: String,
+        modelName: String,
+        voice: String,
+        responseFormat: String,
+        callback: (File?, Int, Throwable?) -> Unit
+    ) {
         val baseUrl = normalizedBaseUrl()
         val url = if (baseUrl.endsWith("/")) "${baseUrl}audio/speech"
                   else "${baseUrl}/audio/speech"
@@ -135,7 +141,8 @@ class OpenAiClient(private val endpoint: Endpoint) {
         val json = JSONObject().apply {
             put("model", modelName)
             put("input", text)
-            put("voice", "alloy")
+            put("voice", voice)
+            put("response_format", responseFormat)
         }
 
         val requestBuilder = Request.Builder()
@@ -161,7 +168,14 @@ class OpenAiClient(private val endpoint: Endpoint) {
                 try {
                     // Estimate tokens for TTS (approx 1 token per 4 chars)
                     val tokens = (text.length / 4).coerceAtLeast(1)
-                    val tempFile = File.createTempFile("tts_", ".mp3")
+                    val contentType = response.header("Content-Type", "audio/mpeg") ?: "audio/mpeg"
+                    val ext = when {
+                        contentType.contains("wav", ignoreCase = true) -> "wav"
+                        contentType.contains("ogg", ignoreCase = true) || contentType.contains("opus", ignoreCase = true) -> "ogg"
+                        contentType.contains("flac", ignoreCase = true) -> "flac"
+                        else -> "mp3"
+                    }
+                    val tempFile = File.createTempFile("tts_", ".$ext")
                     response.body?.source()?.let { source ->
                         tempFile.outputStream().use { output ->
                             output.write(source.readByteArray())

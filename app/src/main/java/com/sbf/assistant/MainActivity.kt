@@ -320,6 +320,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupPromptSettings() {
+        val ttsVoices = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+        val ttsFormats = listOf("mp3", "wav", "ogg", "flac")
+        val ttsVoiceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, ttsVoices)
+        val ttsFormatAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, ttsFormats)
+        binding.acTtsVoice.setAdapter(ttsVoiceAdapter)
+        binding.acTtsResponseFormat.setAdapter(ttsFormatAdapter)
+        binding.acTtsVoice.setText(
+            settingsManager.ttsVoice.takeIf { it in ttsVoices } ?: "alloy",
+            false
+        )
+        binding.acTtsResponseFormat.setText(
+            settingsManager.ttsResponseFormat.takeIf { it in ttsFormats } ?: "mp3",
+            false
+        )
+
         binding.etSystemPrompt.setText(settingsManager.agentSystemPrompt)
         binding.etUserPromptPrefix.setText(settingsManager.agentUserPromptPrefix)
         binding.swUserPrefixVars.isChecked = settingsManager.agentUserPromptPrefixVarsEnabled
@@ -330,6 +345,7 @@ class MainActivity : AppCompatActivity() {
         binding.tilAutoConversationTimeout.visibility = if (binding.swAutoConversation.isChecked) View.VISIBLE else View.GONE
         binding.swTtsChunk.isChecked = settingsManager.ttsChunkOnPunctuation
         binding.swTtsStream.isChecked = settingsManager.ttsStreamOnTokens
+        binding.swForceWavRemote.isChecked = settingsManager.forceWavForRemote
         binding.etTtsSeparators.setText(settingsManager.ttsChunkSeparators)
         binding.etTtsMaxLen.setText(settingsManager.ttsChunkMaxLength.toString())
         binding.tilTtsSeparators.visibility = if (binding.swTtsChunk.isChecked) View.VISIBLE else View.GONE
@@ -370,6 +386,17 @@ class MainActivity : AppCompatActivity() {
         }
         binding.swTtsStream.setOnCheckedChangeListener { _, isChecked ->
             settingsManager.ttsStreamOnTokens = isChecked
+        }
+        binding.acTtsVoice.onItemClickListener =
+            AdapterView.OnItemClickListener { _, _, position, _ ->
+                settingsManager.ttsVoice = ttsVoices[position]
+            }
+        binding.acTtsResponseFormat.onItemClickListener =
+            AdapterView.OnItemClickListener { _, _, position, _ ->
+                settingsManager.ttsResponseFormat = ttsFormats[position]
+            }
+        binding.swForceWavRemote.setOnCheckedChangeListener { _, isChecked ->
+            settingsManager.forceWavForRemote = isChecked
         }
         binding.etTtsSeparators.doAfterTextChanged { text ->
             settingsManager.ttsChunkSeparators = text?.toString().orEmpty()

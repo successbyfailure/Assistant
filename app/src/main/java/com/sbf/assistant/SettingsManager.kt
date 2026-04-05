@@ -267,6 +267,18 @@ class SettingsManager(context: Context) {
         get() = prefs.getBoolean("tts_stream_on_tokens", false)
         set(value) = prefs.edit().putBoolean("tts_stream_on_tokens", value).apply()
 
+    var ttsVoice: String
+        get() = prefs.getString("tts_voice", "alloy") ?: "alloy"
+        set(value) = prefs.edit().putString("tts_voice", value).apply()
+
+    var ttsResponseFormat: String
+        get() = prefs.getString("tts_response_format", "mp3") ?: "mp3"
+        set(value) = prefs.edit().putString("tts_response_format", value).apply()
+
+    var forceWavForRemote: Boolean
+        get() = prefs.getBoolean("force_wav_for_remote", true)
+        set(value) = prefs.edit().putBoolean("force_wav_for_remote", value).apply()
+
     var themeMode: String
         get() = prefs.getString("theme_mode", ThemeManager.MODE_SYSTEM) ?: ThemeManager.MODE_SYSTEM
         set(value) = prefs.edit().putString("theme_mode", value).apply()

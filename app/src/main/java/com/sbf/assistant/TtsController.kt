@@ -109,7 +109,12 @@ class TtsController(
             return
         }
         updatePlaybackState(PlaybackState.WAITING)
-        OpenAiClient(endpoint).generateSpeech(text, ttsPref.modelName) { file, _, error ->
+        OpenAiClient(endpoint).generateSpeech(
+            text = text,
+            modelName = ttsPref.modelName,
+            voice = settingsManager.ttsVoice,
+            responseFormat = settingsManager.ttsResponseFormat
+        ) { file, _, error ->
             if (file != null) {
                 playFile(file) {
                     recomputePlaybackState()
@@ -198,7 +203,12 @@ class TtsController(
         if (remoteBusy) return
         remoteBusy = true
         updatePlaybackState(PlaybackState.WAITING)
-        OpenAiClient(endpoint).generateSpeech(next, modelName) { file, _, error ->
+        OpenAiClient(endpoint).generateSpeech(
+            text = next,
+            modelName = modelName,
+            voice = settingsManager.ttsVoice,
+            responseFormat = settingsManager.ttsResponseFormat
+        ) { file, _, error ->
             if (file != null) {
                 playFile(file) {
                     remoteBusy = false
@@ -239,6 +249,15 @@ class TtsController(
         streamHandler.removeCallbacks(streamFlushRunnable)
         drainHandler.removeCallbacks(drainRunnable)
         updatePlaybackState(PlaybackState.WAITING)
+    }
+
+    fun clearQueue() {
+        ttsQueue.clear()
+        streamingBuffer.clear()
+        streamingFinalPending = false
+        streamHandler.removeCallbacks(streamFlushRunnable)
+        drainHandler.removeCallbacks(drainRunnable)
+        recomputePlaybackState()
     }
 
     fun feedStreaming(text: String, isFinal: Boolean) {

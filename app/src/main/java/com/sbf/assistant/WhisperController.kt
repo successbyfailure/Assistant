@@ -6,7 +6,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.io.File
+import java.net.SocketTimeoutException
 
 class WhisperController(
     private val settingsManager: SettingsManager,
@@ -82,8 +84,45 @@ class WhisperController(
         }
 
         OpenAiClient(endpoint).transcribeAudio(file, config.modelName) { text, _, error ->
-            audioRecorder.deleteFile(file)
-            mainHandler.post { onResult(text, error?.message) }
+            if (text != null) {
+                audioRecorder.deleteFile(file)
+                mainHandler.post { onResult(text, null) }
+                return@transcribeAudio
+            }
+            val remoteError = classifyRemoteError(error)
+            val canFallbackToLocal = settingsManager.localSttEnabled && settingsManager.localSttModel.isNotBlank()
+            if (!canFallbackToLocal) {
+                audioRecorder.deleteFile(file)
+                mainHandler.post { onResult(null, remoteError) }
+                return@transcribeAudio
+            }
+            scope.launch(Dispatchers.IO) {
+                val prepared = localWhisper.prepareModel(settingsManager.localSttModel)
+                val localText = if (prepared) localWhisper.transcribe(file) else null
+                audioRecorder.deleteFile(file)
+                withContext(Dispatchers.Main) {
+                    if (!localText.isNullOrBlank()) {
+                        onResult(localText, null)
+                    } else {
+                        onResult(null, "$remoteError. Fallback local no disponible")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun classifyRemoteError(error: Throwable?): String {
+        return when (error) {
+            is OpenAiClient.ApiError -> when (error.code) {
+                401, 403 -> "Error de autenticación STT, verifica la API key"
+                503 -> "Modelo STT no disponible, intenta de nuevo"
+                408 -> "Tiempo de espera agotado en STT"
+                else -> error.message ?: "Error STT remoto"
+            }
+            is SocketTimeoutException -> "Tiempo de espera agotado en STT"
+            is IOException -> "Error de red STT, revisa la conexión"
+            null -> "Error STT remoto desconocido"
+            else -> error.message ?: "Error STT remoto"
         }
     }
 

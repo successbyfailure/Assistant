@@ -311,7 +311,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
             whisperController.cancelRecording()
         }
         stopStandbyMonitor()
-        ttsController.stop()
+        interruptTtsPlayback()
         isTtsSpeaking = false
 
         sttMode = SttMode.NONE
@@ -333,7 +333,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
             whisperController.cancelRecording()
         }
         stopStandbyMonitor()
-        ttsController.stop()
+        interruptTtsPlayback()
         isTtsSpeaking = false
 
         val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
@@ -408,7 +408,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
 
         if (isStop) {
             speechRecognizer?.stopListening()
-            ttsController.stop()
+            interruptTtsPlayback()
             isTtsSpeaking = false
             chatController.cancelCurrentRequest()
             isStandbyModeActive = false
@@ -418,7 +418,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
 
         if (isWake) {
             stopStandbyMonitor()
-            ttsController.stop()
+            interruptTtsPlayback()
             isTtsSpeaking = false
             startListeningAuto()
             return
@@ -458,8 +458,9 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
                     return@launch
                 }
             }
+            val usePcm = config.endpointId == "local" || settingsManager.forceWavForRemote
             val file = whisperController.startRecording(
-                usePcm = true,
+                usePcm = usePcm,
                 autoStopOnSilence = !ptt,
                 onSilenceDetected = {
                     scope.launch(Dispatchers.Main) {
@@ -599,7 +600,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         standbyTimeoutJob = null
         speechRecognizer?.stopListening()
         whisperController.cancelRecording()
-        ttsController.stop()
+        interruptTtsPlayback()
 
         sttMode = SttMode.NONE
         activeSttConfig = null
@@ -648,10 +649,25 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
             }
         }
 
+        val streamTts = settingsManager.ttsStreamOnTokens && settingsManager.ttsChunkOnPunctuation
+        if (streamTts) {
+            ttsController.startStreaming {
+                isTtsSpeaking = false
+                if (!isStandbyModeActive) {
+                    statusText.text = "Assistant Ready"
+                } else if (sttMode == SttMode.STANDBY) {
+                    startStandbyTimeout(settingsManager.autoConversationTimeoutMs)
+                }
+            }
+        }
+
         chatController.processQuery(query, object : ChatController.Callbacks {
             override fun onStatusUpdate(status: String) { updateStatusLabel(status) }
             override fun onResponseToken(token: String) {
                 // ... logic for tokens ...
+                if (streamTts) {
+                    ttsController.feedStreaming(token, false)
+                }
                 if (currentAssistantMessageIndex == -1) {
                     messages.add(
                         ChatMessage(
@@ -716,6 +732,11 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
                     startStandbyMonitor()
                 }
 
+                if (streamTts) {
+                    ttsController.feedStreaming("", true)
+                    return
+                }
+
                 ttsController.speak(fullResponse) {
                     isTtsSpeaking = false
                     if (!isStandbyModeActive) {
@@ -763,7 +784,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         val message = messages.getOrNull(index) ?: return
         val text = message.text.trim()
         if (text.isBlank()) return
-        ttsController.stop()
+        interruptTtsPlayback()
         ttsController.speak(text)
     }
 
@@ -771,6 +792,11 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         val message = messages.getOrNull(index) ?: return
         messages[index] = message.copy(thoughtCollapsed = !message.thoughtCollapsed)
         chatAdapter.notifyItemChanged(index)
+    }
+
+    private fun interruptTtsPlayback() {
+        ttsController.clearQueue()
+        ttsController.stop()
     }
 
 }
