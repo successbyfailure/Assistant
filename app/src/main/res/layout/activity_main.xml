@@ -62,7 +62,7 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="wrap_content"
-                        android:text="Endpoints"
+                        android:text="Providers"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
                     <Button
                         android:id="@+id/btn_add_template"
@@ -100,7 +100,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Categories"
+                    android:text="ModelConfig"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                 <androidx.recyclerview.widget.RecyclerView
@@ -474,82 +474,40 @@
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/sw_tts_chunk"
+                    android:id="@+id/sw_realtime_enabled"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="TTS fluido por puntuación (.,/)"
-                    android:layout_marginTop="8dp" />
-
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/sw_tts_stream"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="TTS en streaming mientras escribe"
-                    android:layout_marginTop="8dp" />
+                    android:text="Modo Realtime (WebSocket audio-a-audio)"
+                    android:layout_marginTop="12dp" />
 
                 <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/til_tts_voice"
+                    android:id="@+id/til_realtime_model"
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:hint="Voz TTS">
+                    android:hint="Realtime model (opcional)">
 
                     <AutoCompleteTextView
-                        android:id="@+id/ac_tts_voice"
+                        android:id="@+id/et_realtime_model"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:inputType="none" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/til_tts_response_format"
+                    android:id="@+id/til_realtime_voice"
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:hint="Formato respuesta TTS">
+                    android:hint="Realtime voice">
 
                     <AutoCompleteTextView
-                        android:id="@+id/ac_tts_response_format"
+                        android:id="@+id/ac_realtime_voice"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:inputType="none" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/sw_force_wav_remote"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Forzar WAV para STT remoto"
-                    android:layout_marginTop="8dp" />
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/til_tts_separators"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="Separadores TTS (ej: .,/;:!?)">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/et_tts_separators"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="text" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/til_tts_max_len"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="TTS max. caracteres por chunk">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/et_tts_max_len"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="number" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.textfield.TextInputLayout

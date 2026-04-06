@@ -75,6 +75,24 @@ class CategoryAdapter(
     private val onEdit: (Category) -> Unit
 ) : RecyclerView.Adapter<CategoryAdapter.ViewHolder>() {
 
+    private fun categoryDisplayName(category: Category): String {
+        return when (category) {
+            Category.AGENT -> "Agent"
+            Category.STT -> "STT"
+            Category.TTS -> "TTS"
+            Category.IMAGE_GEN -> "Image Gen"
+            Category.OCR -> "OCR"
+        }
+    }
+
+    private fun endpointDisplayName(endpointId: String): String {
+        return when (endpointId) {
+            "system" -> "Android Default"
+            "local" -> "Local"
+            else -> settingsManager.getEndpoint(endpointId)?.name ?: "Unknown"
+        }
+    }
+
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val tvCategoryName: TextView = view.findViewById(R.id.tv_category_name)
         val tvPrimary: TextView = view.findViewById(R.id.tv_primary)
@@ -90,21 +108,19 @@ class CategoryAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val category = categories[position]
         val config = settingsManager.getCategoryConfig(category)
-        
-        holder.tvCategoryName.text = category.name
-        
-        val primaryText = config.primary?.let { 
-            val endpoint = settingsManager.getEndpoint(it.endpointId)
-            "${it.modelName} (${endpoint?.name ?: "Unknown"})"
+
+        holder.tvCategoryName.text = categoryDisplayName(category)
+
+        val primaryText = config.primary?.let {
+            "${it.modelName} (${endpointDisplayName(it.endpointId)})"
         } ?: "Not configured"
         holder.tvPrimary.text = primaryText
-        
-        val backupText = config.backup?.let { 
-            val endpoint = settingsManager.getEndpoint(it.endpointId)
-            "${it.modelName} (${endpoint?.name ?: "Unknown"})"
+
+        val backupText = config.backup?.let {
+            "${it.modelName} (${endpointDisplayName(it.endpointId)})"
         } ?: "Not configured"
         holder.tvBackup.text = backupText
-        
+
         holder.btnEdit.setOnClickListener { onEdit(category) }
     }
 

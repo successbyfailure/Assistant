@@ -35,6 +35,7 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 import com.sbf.assistant.llm.LocalLlmService
 import com.sbf.assistant.llm.MediaPipeLlmService
+import com.sbf.assistant.realtime.RealtimeConversationManager
 
 /**
  * Sesión de interacción por voz del asistente.
@@ -96,6 +97,10 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
     private var standbyTimeoutJob: Job? = null
     private var isTtsSpeaking = false
     private var isSessionActive = false  // Para evitar que coroutines sigan después de onHide
+    private var realtimeManager: RealtimeConversationManager? = null
+    private var realtimeState = RealtimeConversationManager.RealtimeState.IDLE
+    private var realtimeAssistantMessageIndex = -1
+    private val realtimeAssistantBuffer = StringBuilder()
     private val STANDBY_TIMEOUT_MS = 30_000L
 
     override val lifecycle: Lifecycle
@@ -317,6 +322,11 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         sttMode = SttMode.NONE
         activeSttConfig = null
 
+        if (settingsManager.realtimeEnabled) {
+            toggleRealtimeSession()
+            return
+        }
+
         val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
         Log.d(TAG, "startListeningAuto: sttConfig=${sttConfig?.endpointId ?: "none"}")
         if (sttConfig?.endpointId == "system" || sttConfig == null) {
@@ -343,6 +353,108 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         } else {
             statusText.text = "PTT requiere Whisper (no sistema)"
         }
+    }
+
+    private fun toggleRealtimeSession() {
+        if (realtimeManager?.isSessionActive() == true) {
+            if (realtimeState == RealtimeConversationManager.RealtimeState.SPEAKING ||
+                realtimeState == RealtimeConversationManager.RealtimeState.RESPONDING
+            ) {
+                realtimeManager?.interrupt()
+                statusText.text = "Realtime listening..."
+            } else {
+                stopRealtimeSession()
+                showSttUi(false)
+                statusText.text = "Assistant Ready"
+            }
+            return
+        }
+        val agentConfig = settingsManager.getCategoryConfig(Category.AGENT).primary
+        if (agentConfig == null || agentConfig.endpointId == "local" || agentConfig.endpointId == "system") {
+            statusText.text = "Realtime requiere endpoint remoto AGENT"
+            return
+        }
+        val endpoint = settingsManager.getEndpoint(agentConfig.endpointId)
+        if (endpoint == null) {
+            statusText.text = "Endpoint AGENT no encontrado"
+            return
+        }
+        val model = settingsManager.realtimeModel.ifBlank { agentConfig.modelName }
+        if (model.isBlank()) {
+            statusText.text = "Configura realtime model"
+            return
+        }
+
+        interruptTtsPlayback()
+        isTtsSpeaking = false
+        realtimeAssistantBuffer.clear()
+        realtimeAssistantMessageIndex = -1
+        showSttUi(true, ptt = false)
+        realtimeManager = RealtimeConversationManager(
+            context = context,
+            settingsManager = settingsManager,
+            onTranscript = { text ->
+                scope.launch(Dispatchers.Main) {
+                    if (text.isBlank()) return@launch
+                    messages.add(ChatMessage(text, true))
+                    chatAdapter.notifyItemInserted(messages.size - 1)
+                    chatRecycler.scrollToPosition(messages.size - 1)
+                    historyStore.append(ChatMessage(text, true))
+                }
+            },
+            onResponse = { text ->
+                scope.launch(Dispatchers.Main) {
+                    if (text.isNotBlank()) {
+                        finalizeRealtimeAssistant(text)
+                    }
+                }
+            },
+            onStateChange = { state ->
+                scope.launch(Dispatchers.Main) {
+                    realtimeState = state
+                    statusText.text = when (state) {
+                        RealtimeConversationManager.RealtimeState.CONNECTING -> "Realtime connecting..."
+                        RealtimeConversationManager.RealtimeState.LISTENING -> "Realtime listening..."
+                        RealtimeConversationManager.RealtimeState.TRANSCRIBING -> "Realtime transcribing..."
+                        RealtimeConversationManager.RealtimeState.RESPONDING -> "Realtime responding..."
+                        RealtimeConversationManager.RealtimeState.SPEAKING -> "Realtime speaking..."
+                        RealtimeConversationManager.RealtimeState.IDLE -> "Assistant Ready"
+                    }
+                }
+            },
+            onError = { err ->
+                scope.launch(Dispatchers.Main) {
+                    statusText.text = "Realtime error: $err"
+                    stopRealtimeSession()
+                    showSttUi(false)
+                }
+            }
+        )
+        realtimeManager?.startSession()
+    }
+
+    private fun stopRealtimeSession() {
+        realtimeManager?.stopSession()
+        realtimeManager = null
+        realtimeState = RealtimeConversationManager.RealtimeState.IDLE
+        realtimeAssistantBuffer.clear()
+        realtimeAssistantMessageIndex = -1
+    }
+
+    private fun finalizeRealtimeAssistant(text: String) {
+        if (realtimeAssistantMessageIndex == -1) {
+            messages.add(ChatMessage(text, false))
+            realtimeAssistantMessageIndex = messages.size - 1
+            chatAdapter.notifyItemInserted(realtimeAssistantMessageIndex)
+        } else {
+            val msg = messages[realtimeAssistantMessageIndex]
+            messages[realtimeAssistantMessageIndex] = msg.copy(text = text, isThinking = false)
+            chatAdapter.notifyItemChanged(realtimeAssistantMessageIndex)
+        }
+        historyStore.append(ChatMessage(text, false))
+        realtimeAssistantBuffer.clear()
+        realtimeAssistantMessageIndex = -1
+        chatRecycler.scrollToPosition(messages.size - 1)
     }
 
     private fun startSystemListening() {
@@ -600,6 +712,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
         standbyTimeoutJob = null
         speechRecognizer?.stopListening()
         whisperController.cancelRecording()
+        stopRealtimeSession()
         interruptTtsPlayback()
 
         sttMode = SttMode.NONE
@@ -614,6 +727,7 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
 
         // Limpiar completamente
         standbyTimeoutJob?.cancel()
+        stopRealtimeSession()
         scope.cancel()
         ttsController.release()
         speechRecognizer?.destroy()

@@ -22,6 +22,7 @@ class AudioRecorder(private val context: Context) {
     private var recordThread: Thread? = null
     private var pcmBytesWritten = 0
     private var isPcmRecording = false
+    private var isStreamingRecording = false
     private var autoStopOnSilence = false
     private var silenceDurationMs: Long = 0
     private var minSpeechMs: Long = 0
@@ -103,7 +104,9 @@ class AudioRecorder(private val context: Context) {
 
     fun stopRecording() {
         synchronized(this) {
-            if (isPcmRecording) {
+            if (isStreamingRecording) {
+                stopStreamingRecording()
+            } else if (isPcmRecording) {
                 stopPcmRecording()
             } else {
                 try { mediaRecorder?.stop() } catch (_: Exception) {}
@@ -207,6 +210,58 @@ class AudioRecorder(private val context: Context) {
         return currentFile
     }
 
+    @SuppressLint("MissingPermission")
+    fun startStreamingRecording(
+        onChunk: (ByteArray) -> Unit,
+        chunkSizeMs: Int = 100,
+        onAmplitudeUpdate: ((Float) -> Unit)? = null
+    ): Boolean {
+        synchronized(this) {
+            stopRecording()
+            val sampleRate = 16000
+            val channelConfig = AudioFormat.CHANNEL_IN_MONO
+            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            if (minBuffer == AudioRecord.ERROR || minBuffer == AudioRecord.ERROR_BAD_VALUE) return false
+
+            val chunkBytes = ((sampleRate * chunkSizeMs.coerceAtLeast(20)) / 1000) * 2
+            val bufferSize = maxOf(minBuffer * 2, chunkBytes)
+            val recorder = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSize
+            )
+            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                recorder.release()
+                return false
+            }
+
+            this.onAmplitudeUpdate = onAmplitudeUpdate
+            isStreamingRecording = true
+            currentFile = null
+            audioRecord = recorder
+            recorder.startRecording()
+
+            recordThread = Thread {
+                val buffer = ByteArray(chunkBytes)
+                while (isStreamingRecording) {
+                    val read = recorder.read(buffer, 0, buffer.size)
+                    if (read > 0) {
+                        val chunk = buffer.copyOf(read)
+                        onChunk(chunk)
+                        val rms = computeRms(chunk, chunk.size)
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            this.onAmplitudeUpdate?.invoke(rms)
+                        }
+                    }
+                }
+            }.also { it.start() }
+            return true
+        }
+    }
+
     private fun stopPcmRecording() {
         isPcmRecording = false
         try { audioRecord?.stop() } catch (_: Exception) {}
@@ -215,6 +270,15 @@ class AudioRecorder(private val context: Context) {
         try { recordThread?.join(500) } catch (_: Exception) {}
         recordThread = null
         currentFile?.let { updateWavHeader(it, pcmBytesWritten) }
+    }
+
+    private fun stopStreamingRecording() {
+        isStreamingRecording = false
+        try { audioRecord?.stop() } catch (_: Exception) {}
+        try { audioRecord?.release() } catch (_: Exception) {}
+        audioRecord = null
+        try { recordThread?.join(500) } catch (_: Exception) {}
+        recordThread = null
     }
 
     private fun writeWavHeader(file: File, sampleRate: Int, channels: Int, bitsPerSample: Int, dataLength: Int) {

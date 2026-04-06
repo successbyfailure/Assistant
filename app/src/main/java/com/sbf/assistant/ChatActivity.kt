@@ -38,6 +38,7 @@ import java.util.Date
 import java.util.Locale
 import com.sbf.assistant.llm.LocalLlmService
 import com.sbf.assistant.llm.MediaPipeLlmService
+import com.sbf.assistant.realtime.RealtimeConversationManager
 
 class ChatActivity : AppCompatActivity() {
 
@@ -95,6 +96,11 @@ class ChatActivity : AppCompatActivity() {
     private var statusTickerJob: Job? = null
     private var requestStartMs = 0L
     private var suppressTtsForActiveResponse = false
+    private var realtimeManager: RealtimeConversationManager? = null
+    private var isRealtimeActive = false
+    private var realtimeState = RealtimeConversationManager.RealtimeState.IDLE
+    private var realtimeAssistantMessageIndex = -1
+    private val realtimeAssistantBuffer = StringBuilder()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -253,6 +259,11 @@ class ChatActivity : AppCompatActivity() {
             return
         }
 
+        if (settingsManager.realtimeEnabled) {
+            toggleRealtimeSession()
+            return
+        }
+
         suppressTtsForActiveResponse = true
         warmupManager.warmupStt()
 
@@ -262,6 +273,116 @@ class ChatActivity : AppCompatActivity() {
         } else {
             toggleWhisperRecording(sttConfig)
         }
+    }
+
+    private fun toggleRealtimeSession() {
+        if (isRealtimeActive) {
+            if (realtimeState == RealtimeConversationManager.RealtimeState.SPEAKING ||
+                realtimeState == RealtimeConversationManager.RealtimeState.RESPONDING
+            ) {
+                realtimeManager?.interrupt()
+                setStatus("Realtime listening", showProgress = true)
+            } else {
+                stopRealtimeSession()
+                showSttUi(false)
+                setStatus("Ready", showProgress = false)
+            }
+            return
+        }
+        val agentConfig = settingsManager.getCategoryConfig(Category.AGENT).primary
+        if (agentConfig == null || agentConfig.endpointId == "local" || agentConfig.endpointId == "system") {
+            Toast.makeText(this, "Realtime requiere endpoint remoto en AGENT", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val endpoint = settingsManager.getEndpoint(agentConfig.endpointId)
+        if (endpoint == null) {
+            Toast.makeText(this, "Endpoint AGENT no encontrado", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val model = settingsManager.realtimeModel.ifBlank { agentConfig.modelName }
+        if (model.isBlank()) {
+            Toast.makeText(this, "Configura realtime model o modelo AGENT", Toast.LENGTH_SHORT).show()
+            return
+        }
+        suppressTtsForActiveResponse = true
+        interruptTtsPlayback()
+        showSttUi(true, ptt = false, readyToSpeak = true)
+        realtimeAssistantBuffer.clear()
+        realtimeAssistantMessageIndex = -1
+        realtimeManager = RealtimeConversationManager(
+            context = this,
+            settingsManager = settingsManager,
+            onTranscript = { text ->
+                if (text.isBlank()) return@RealtimeConversationManager
+                messages.add(ChatMessage(text.trim(), true))
+                chatAdapter.notifyItemInserted(messages.size - 1)
+                chatRecycler.scrollToPosition(messages.size - 1)
+                historyStore.append(ChatMessage(text.trim(), true))
+            },
+            onResponse = { text ->
+                if (text.isBlank()) return@RealtimeConversationManager
+                finalizeRealtimeAssistant(text)
+            },
+            onStateChange = { state ->
+                realtimeState = state
+                when (state) {
+                    RealtimeConversationManager.RealtimeState.CONNECTING -> setStatus("Realtime connecting", showProgress = true)
+                    RealtimeConversationManager.RealtimeState.LISTENING -> setStatus("Realtime listening", showProgress = true)
+                    RealtimeConversationManager.RealtimeState.TRANSCRIBING -> setStatus("Realtime transcribing", showProgress = true)
+                    RealtimeConversationManager.RealtimeState.RESPONDING -> setStatus("Realtime responding", showProgress = true)
+                    RealtimeConversationManager.RealtimeState.SPEAKING -> setStatus("Realtime speaking", showProgress = true)
+                    RealtimeConversationManager.RealtimeState.IDLE -> {
+                        isRealtimeActive = false
+                        setStatus("Ready", showProgress = false)
+                    }
+                }
+            },
+            onError = { err ->
+                Toast.makeText(this, "Realtime: $err", Toast.LENGTH_SHORT).show()
+                stopRealtimeSession()
+            }
+        )
+        isRealtimeActive = true
+        realtimeManager?.startSession()
+    }
+
+    private fun stopRealtimeSession() {
+        realtimeManager?.stopSession()
+        realtimeManager = null
+        isRealtimeActive = false
+        realtimeState = RealtimeConversationManager.RealtimeState.IDLE
+        realtimeAssistantBuffer.clear()
+        realtimeAssistantMessageIndex = -1
+    }
+
+    private fun appendRealtimeAssistantDelta(delta: String) {
+        realtimeAssistantBuffer.append(delta)
+        if (realtimeAssistantMessageIndex == -1) {
+            messages.add(ChatMessage(realtimeAssistantBuffer.toString(), false))
+            realtimeAssistantMessageIndex = messages.size - 1
+            chatAdapter.notifyItemInserted(realtimeAssistantMessageIndex)
+        } else {
+            val msg = messages[realtimeAssistantMessageIndex]
+            messages[realtimeAssistantMessageIndex] = msg.copy(text = realtimeAssistantBuffer.toString())
+            chatAdapter.notifyItemChanged(realtimeAssistantMessageIndex)
+        }
+        chatRecycler.scrollToPosition(messages.size - 1)
+    }
+
+    private fun finalizeRealtimeAssistant(text: String) {
+        if (realtimeAssistantMessageIndex == -1) {
+            messages.add(ChatMessage(text, false))
+            realtimeAssistantMessageIndex = messages.size - 1
+            chatAdapter.notifyItemInserted(realtimeAssistantMessageIndex)
+        } else {
+            val msg = messages[realtimeAssistantMessageIndex]
+            messages[realtimeAssistantMessageIndex] = msg.copy(text = text, isThinking = false)
+            chatAdapter.notifyItemChanged(realtimeAssistantMessageIndex)
+        }
+        realtimeAssistantBuffer.clear()
+        realtimeAssistantMessageIndex = -1
+        chatRecycler.scrollToPosition(messages.size - 1)
+        historyStore.append(ChatMessage(text, false))
     }
 
     private fun setupMicButtonBehavior() {
@@ -281,6 +402,7 @@ class ChatActivity : AppCompatActivity() {
                     isCancelled = false
                     v.postDelayed({
                         if (v.isPressed && !isCancelled && sttMode == SttMode.NONE) {
+                            if (settingsManager.realtimeEnabled) return@postDelayed
                             val sttConfig = settingsManager.getCategoryConfig(Category.STT).primary
                             if (sttConfig != null && sttConfig.endpointId != "system") {
                                 startWhisperPtt(sttConfig)
@@ -541,6 +663,9 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun processUserQuery(query: String) {
+        if (isRealtimeActive) {
+            stopRealtimeSession()
+        }
         suppressTtsForActiveResponse = false
         messages.add(ChatMessage(query, true))
         chatAdapter.notifyItemInserted(messages.size - 1)
@@ -875,6 +1000,7 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopRealtimeSession()
         scope.cancel()
         ttsController.release()
         speechRecognizer?.destroy()

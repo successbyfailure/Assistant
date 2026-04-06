@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.WindowManager
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.AdapterView
@@ -153,8 +154,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTabs() {
         val tabLayout = binding.tabLayout
-        tabLayout.addTab(tabLayout.newTab().setText("Endpoints"))
-        tabLayout.addTab(tabLayout.newTab().setText("Categorias"))
+        tabLayout.addTab(tabLayout.newTab().setText("Providers"))
+        tabLayout.addTab(tabLayout.newTab().setText("ModelConfig"))
         tabLayout.addTab(tabLayout.newTab().setText("Tools"))
         tabLayout.addTab(tabLayout.newTab().setText("Prompts"))
         tabLayout.addTab(tabLayout.newTab().setText("Estadisticas"))
@@ -320,18 +321,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupPromptSettings() {
-        val ttsVoices = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer")
-        val ttsFormats = listOf("mp3", "wav", "ogg", "flac")
-        val ttsVoiceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, ttsVoices)
-        val ttsFormatAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, ttsFormats)
-        binding.acTtsVoice.setAdapter(ttsVoiceAdapter)
-        binding.acTtsResponseFormat.setAdapter(ttsFormatAdapter)
-        binding.acTtsVoice.setText(
-            settingsManager.ttsVoice.takeIf { it in ttsVoices } ?: "alloy",
+        val realtimeModels = listOf(
+            "gpt-4o-realtime-preview",
+            "gpt-4o-mini-realtime-preview"
+        )
+        val realtimeVoices = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+        val realtimeModelAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, realtimeModels)
+        val realtimeVoiceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, realtimeVoices)
+        binding.etRealtimeModel.setAdapter(realtimeModelAdapter)
+        binding.acRealtimeVoice.setAdapter(realtimeVoiceAdapter)
+        binding.acRealtimeVoice.setText(
+            settingsManager.realtimeVoice.takeIf { it in realtimeVoices } ?: "alloy",
             false
         )
-        binding.acTtsResponseFormat.setText(
-            settingsManager.ttsResponseFormat.takeIf { it in ttsFormats } ?: "mp3",
+        binding.etRealtimeModel.setText(
+            settingsManager.realtimeModel.takeIf { it.isNotBlank() } ?: realtimeModels.first(),
             false
         )
 
@@ -343,14 +347,9 @@ class MainActivity : AppCompatActivity() {
         binding.swAutoConversation.isChecked = settingsManager.autoConversationEnabled
         binding.etAutoConversationTimeout.setText(settingsManager.autoConversationTimeoutMs.toString())
         binding.tilAutoConversationTimeout.visibility = if (binding.swAutoConversation.isChecked) View.VISIBLE else View.GONE
-        binding.swTtsChunk.isChecked = settingsManager.ttsChunkOnPunctuation
-        binding.swTtsStream.isChecked = settingsManager.ttsStreamOnTokens
-        binding.swForceWavRemote.isChecked = settingsManager.forceWavForRemote
-        binding.etTtsSeparators.setText(settingsManager.ttsChunkSeparators)
-        binding.etTtsMaxLen.setText(settingsManager.ttsChunkMaxLength.toString())
-        binding.tilTtsSeparators.visibility = if (binding.swTtsChunk.isChecked) View.VISIBLE else View.GONE
-        binding.tilTtsMaxLen.visibility = if (binding.swTtsChunk.isChecked) View.VISIBLE else View.GONE
-        binding.swTtsStream.visibility = if (binding.swTtsChunk.isChecked) View.VISIBLE else View.GONE
+        binding.swRealtimeEnabled.isChecked = settingsManager.realtimeEnabled
+        binding.tilRealtimeModel.visibility = if (binding.swRealtimeEnabled.isChecked) View.VISIBLE else View.GONE
+        binding.tilRealtimeVoice.visibility = if (binding.swRealtimeEnabled.isChecked) View.VISIBLE else View.GONE
         binding.etVoiceShortcut.setText(settingsManager.voiceShortcutPhrase)
         binding.etVoiceShortcut.isEnabled = binding.swVoiceShortcut.isChecked
 
@@ -378,34 +377,21 @@ class MainActivity : AppCompatActivity() {
             settingsManager.agentUserPromptPrefixVarsEnabled = isChecked
             binding.tvUserPrefixHelp.visibility = if (isChecked) View.VISIBLE else View.GONE
         }
-        binding.swTtsChunk.setOnCheckedChangeListener { _, isChecked ->
-            settingsManager.ttsChunkOnPunctuation = isChecked
-            binding.tilTtsSeparators.visibility = if (isChecked) View.VISIBLE else View.GONE
-            binding.tilTtsMaxLen.visibility = if (isChecked) View.VISIBLE else View.GONE
-            binding.swTtsStream.visibility = if (isChecked) View.VISIBLE else View.GONE
+        binding.swRealtimeEnabled.setOnCheckedChangeListener { _, isChecked ->
+            settingsManager.realtimeEnabled = isChecked
+            binding.tilRealtimeModel.visibility = if (isChecked) View.VISIBLE else View.GONE
+            binding.tilRealtimeVoice.visibility = if (isChecked) View.VISIBLE else View.GONE
         }
-        binding.swTtsStream.setOnCheckedChangeListener { _, isChecked ->
-            settingsManager.ttsStreamOnTokens = isChecked
-        }
-        binding.acTtsVoice.onItemClickListener =
+        binding.acRealtimeVoice.onItemClickListener =
             AdapterView.OnItemClickListener { _, _, position, _ ->
-                settingsManager.ttsVoice = ttsVoices[position]
+                settingsManager.realtimeVoice = realtimeVoices[position]
             }
-        binding.acTtsResponseFormat.onItemClickListener =
+        binding.etRealtimeModel.onItemClickListener =
             AdapterView.OnItemClickListener { _, _, position, _ ->
-                settingsManager.ttsResponseFormat = ttsFormats[position]
+                settingsManager.realtimeModel = realtimeModels[position]
             }
-        binding.swForceWavRemote.setOnCheckedChangeListener { _, isChecked ->
-            settingsManager.forceWavForRemote = isChecked
-        }
-        binding.etTtsSeparators.doAfterTextChanged { text ->
-            settingsManager.ttsChunkSeparators = text?.toString().orEmpty()
-        }
-        binding.etTtsMaxLen.doAfterTextChanged { text ->
-            val value = text?.toString()?.toIntOrNull()
-            if (value != null && value > 0) {
-                settingsManager.ttsChunkMaxLength = value
-            }
+        binding.etRealtimeModel.doAfterTextChanged { text ->
+            settingsManager.realtimeModel = text?.toString().orEmpty().trim()
         }
         binding.etVoiceShortcut.doAfterTextChanged { text ->
             settingsManager.voiceShortcutPhrase = text?.toString().orEmpty().trim()
@@ -1745,7 +1731,8 @@ class MainActivity : AppCompatActivity() {
             updateAuthVisibility(authTypeValues[position])
         }
 
-        AlertDialog.Builder(this)
+        showWideDialog(
+            AlertDialog.Builder(this)
             .setTitle("Add MCP Server")
             .setView(dialogView)
             .setPositiveButton("Add") { _, _ ->
@@ -1785,7 +1772,7 @@ class MainActivity : AppCompatActivity() {
                 renderMcpList()
             }
             .setNegativeButton("Cancel", null)
-            .show()
+        )
     }
 
     private fun parseCustomHeaders(text: String): Map<String, String> {
@@ -1973,7 +1960,8 @@ class MainActivity : AppCompatActivity() {
         // Initial fetch
         fetchTools()
 
-        AlertDialog.Builder(this)
+        showWideDialog(
+            AlertDialog.Builder(this)
             .setTitle("Editar: ${server.name}")
             .setView(dialogView)
             .setPositiveButton("Guardar") { _, _ ->
@@ -2018,7 +2006,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Cancelar", null)
-            .show()
+        )
     }
 
     private fun startHealthCheck() {
@@ -2087,7 +2075,8 @@ class MainActivity : AppCompatActivity() {
 
         btnScan.visibility = View.GONE
 
-        AlertDialog.Builder(this)
+        showWideDialog(
+            AlertDialog.Builder(this)
             .setTitle("Configure ${template.name}")
             .setView(dialogView)
             .setPositiveButton("Add") { _, _ ->
@@ -2108,7 +2097,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+        )
     }
 
     private fun showAddEndpointDialog() {
@@ -2162,7 +2151,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this)
+        showWideDialog(
+            AlertDialog.Builder(this)
             .setTitle("Add Endpoint")
             .setView(dialogView)
             .setPositiveButton("Add") { _, _ ->
@@ -2184,7 +2174,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+        )
     }
 
     private fun showEditEndpointDialog(endpoint: Endpoint) {
@@ -2246,7 +2236,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this)
+        showWideDialog(
+            AlertDialog.Builder(this)
             .setTitle("Edit Endpoint")
             .setView(dialogView)
             .setPositiveButton("Save") { _, _ ->
@@ -2272,7 +2263,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+        )
     }
 
     private fun endpointTypeDisplay(type: String): String {
@@ -2343,6 +2334,16 @@ class MainActivity : AppCompatActivity() {
         val spinnerBackupEndpoint = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_backup_endpoint)
         val spinnerBackupModel = dialogView.findViewById<AutoCompleteTextView>(R.id.spinner_backup_model)
         val tvInfo = dialogView.findViewById<TextView>(R.id.tv_category_info)
+        val ttsOptionsLayout = dialogView.findViewById<LinearLayout>(R.id.layout_tts_options)
+        val swTtsChunk = dialogView.findViewById<MaterialSwitch>(R.id.sw_tts_chunk_dialog)
+        val swTtsStream = dialogView.findViewById<MaterialSwitch>(R.id.sw_tts_stream_dialog)
+        val acTtsVoice = dialogView.findViewById<AutoCompleteTextView>(R.id.ac_tts_voice_dialog)
+        val acTtsResponseFormat = dialogView.findViewById<AutoCompleteTextView>(R.id.ac_tts_response_format_dialog)
+        val swForceWavRemote = dialogView.findViewById<MaterialSwitch>(R.id.sw_force_wav_remote_dialog)
+        val tilTtsSeparators = dialogView.findViewById<TextInputLayout>(R.id.til_tts_separators_dialog)
+        val etTtsSeparators = dialogView.findViewById<EditText>(R.id.et_tts_separators_dialog)
+        val tilTtsMaxLen = dialogView.findViewById<TextInputLayout>(R.id.til_tts_max_len_dialog)
+        val etTtsMaxLen = dialogView.findViewById<EditText>(R.id.et_tts_max_len_dialog)
 
         // Show info about the category
         tvInfo.text = when(category) {
@@ -2351,7 +2352,36 @@ class MainActivity : AppCompatActivity() {
                 "STT: Speech-to-Text conversion. 'Android Default' is local/system. Whisper models are remote."
             }
             Category.TTS -> "TTS: Text-to-Speech playback. 'Android Default' is system voices."
-            else -> "Configure endpoints for ${category.name}"
+            else -> "Configure providers for ${category.name}"
+        }
+
+        val ttsVoices = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+        val ttsFormats = listOf("mp3", "wav", "ogg", "flac")
+        if (category == Category.TTS) {
+            ttsOptionsLayout.visibility = View.VISIBLE
+            acTtsVoice.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, ttsVoices))
+            acTtsResponseFormat.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, ttsFormats))
+            swTtsChunk.isChecked = settingsManager.ttsChunkOnPunctuation
+            swTtsStream.isChecked = settingsManager.ttsStreamOnTokens
+            swForceWavRemote.isChecked = settingsManager.forceWavForRemote
+            etTtsSeparators.setText(settingsManager.ttsChunkSeparators)
+            etTtsMaxLen.setText(settingsManager.ttsChunkMaxLength.toString())
+            acTtsVoice.setText(settingsManager.ttsVoice.takeIf { it in ttsVoices } ?: ttsVoices.first(), false)
+            acTtsResponseFormat.setText(
+                settingsManager.ttsResponseFormat.takeIf { it in ttsFormats } ?: ttsFormats.first(),
+                false
+            )
+            val chunkEnabled = swTtsChunk.isChecked
+            tilTtsSeparators.visibility = if (chunkEnabled) View.VISIBLE else View.GONE
+            tilTtsMaxLen.visibility = if (chunkEnabled) View.VISIBLE else View.GONE
+            swTtsStream.visibility = if (chunkEnabled) View.VISIBLE else View.GONE
+            swTtsChunk.setOnCheckedChangeListener { _, isChecked ->
+                tilTtsSeparators.visibility = if (isChecked) View.VISIBLE else View.GONE
+                tilTtsMaxLen.visibility = if (isChecked) View.VISIBLE else View.GONE
+                swTtsStream.visibility = if (isChecked) View.VISIBLE else View.GONE
+            }
+        } else {
+            ttsOptionsLayout.visibility = View.GONE
         }
 
         val endpoints = settingsManager.getEndpoints().toMutableList()
@@ -2457,10 +2487,30 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this)
-            .setTitle("Edit ${category.name}")
+        showWideDialog(
+            AlertDialog.Builder(this)
+            .setTitle("Edit ModelConfig: ${category.name}")
             .setView(dialogView)
             .setPositiveButton("Save") { _, _ ->
+                if (category == Category.TTS) {
+                    settingsManager.ttsChunkOnPunctuation = swTtsChunk.isChecked
+                    settingsManager.ttsStreamOnTokens = swTtsStream.isChecked
+                    settingsManager.forceWavForRemote = swForceWavRemote.isChecked
+                    settingsManager.ttsChunkSeparators = etTtsSeparators.text?.toString().orEmpty()
+                    val parsedMaxLen = etTtsMaxLen.text?.toString()?.trim()?.toIntOrNull()
+                    if (parsedMaxLen != null && parsedMaxLen > 0) {
+                        settingsManager.ttsChunkMaxLength = parsedMaxLen
+                    }
+                    val selectedVoice = acTtsVoice.text?.toString().orEmpty().trim()
+                    if (selectedVoice in ttsVoices) {
+                        settingsManager.ttsVoice = selectedVoice
+                    }
+                    val selectedFormat = acTtsResponseFormat.text?.toString().orEmpty().trim()
+                    if (selectedFormat in ttsFormats) {
+                        settingsManager.ttsResponseFormat = selectedFormat
+                    }
+                }
+
                 val primaryName = spinnerPrimaryEndpoint.text.toString()
                 val primaryEndpoint = if (primaryName == "Android Default (System)" || primaryName.startsWith("Local ")) {
                     null
@@ -2498,6 +2548,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+        )
+    }
+
+    private fun showWideDialog(builder: AlertDialog.Builder, widthPercent: Float = 0.95f): AlertDialog {
+        val dialog = builder.create()
+        dialog.show()
+        val width = (resources.displayMetrics.widthPixels * widthPercent).toInt()
+        dialog.window?.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
+        return dialog
     }
 }

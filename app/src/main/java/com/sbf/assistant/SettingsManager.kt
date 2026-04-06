@@ -279,6 +279,18 @@ class SettingsManager(context: Context) {
         get() = prefs.getBoolean("force_wav_for_remote", true)
         set(value) = prefs.edit().putBoolean("force_wav_for_remote", value).apply()
 
+    var realtimeEnabled: Boolean
+        get() = prefs.getBoolean("realtime_enabled", false)
+        set(value) = prefs.edit().putBoolean("realtime_enabled", value).apply()
+
+    var realtimeModel: String
+        get() = prefs.getString("realtime_model", "") ?: ""
+        set(value) = prefs.edit().putString("realtime_model", value).apply()
+
+    var realtimeVoice: String
+        get() = prefs.getString("realtime_voice", "alloy") ?: "alloy"
+        set(value) = prefs.edit().putString("realtime_voice", value).apply()
+
     var themeMode: String
         get() = prefs.getString("theme_mode", ThemeManager.MODE_SYSTEM) ?: ThemeManager.MODE_SYSTEM
         set(value) = prefs.edit().putString("theme_mode", value).apply()

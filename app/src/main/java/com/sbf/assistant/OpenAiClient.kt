@@ -311,10 +311,11 @@ class OpenAiClient(private val endpoint: Endpoint) {
                 toolBuilders.clear()
                 val error = if (response != null && !response.isSuccessful) {
                     val errorBody = response.body?.string()?.take(2000).orEmpty()
+                    Log.e(TAG, "Chat error ${response.code}: $errorBody")
                     val msg = when (response.code) {
                         401 -> "Error 401: API Key no autorizada"
                         429 -> "Error 429: Demasiadas peticiones"
-                        else -> "Error ${response.code}: ${response.message}"
+                        else -> "Error ${response.code}: ${response.message}. ${errorBody.take(400)}"
                     }
                     ApiError(response.code, msg)
                 } else {

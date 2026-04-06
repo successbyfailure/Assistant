@@ -68,4 +68,103 @@
             android:inputType="text" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <LinearLayout
+        android:id="@+id/layout_tts_options"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <com.google.android.material.divider.MaterialDivider
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="TTS Options"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/sw_tts_chunk_dialog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="TTS fluido por puntuacion (.,/)" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/sw_tts_stream_dialog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="TTS en streaming mientras escribe" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_tts_voice_dialog"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Voz TTS">
+
+            <AutoCompleteTextView
+                android:id="@+id/ac_tts_voice_dialog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_tts_response_format_dialog"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Formato respuesta TTS">
+
+            <AutoCompleteTextView
+                android:id="@+id/ac_tts_response_format_dialog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/sw_force_wav_remote_dialog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Forzar WAV para STT remoto" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_tts_separators_dialog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Separadores TTS (ej: .,/;:!?)">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_tts_separators_dialog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_tts_max_len_dialog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="TTS max. caracteres por chunk">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/et_tts_max_len_dialog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+    </LinearLayout>
+
 </LinearLayout>
