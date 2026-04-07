@@ -72,6 +72,8 @@ Sesion de voz bidireccional via WebSocket (`/v1/realtime`), compatible con la AP
 **Servidor compatible**: oCabra con modelos STT (Whisper) + LLM + TTS configurados. Los modelos se cargan on-demand al iniciar la sesion.
 
 **Pendiente**:
+- Parsear evento `session.loading` en `RealtimeClient.kt` y exponerlo via `RealtimeListener` para mostrar "Cargando modelo X..." en la UI durante cold start del servidor (el evento llega, pero se ignora en el fallback)
+- Verificar que `RealtimeAudioPlayer` usa sample rate 24000 Hz (el TTS de oCabra genera a 24kHz; si esta a 16kHz el audio suena acelerado)
 - Ajuste fino de VAD threshold y silence_duration para conversacion natural
 - Indicador visual de estado (LISTENING/TRANSCRIBING/RESPONDING/SPEAKING) en overlay
 - Soporte para tool calls via Realtime (tools en session.update)
