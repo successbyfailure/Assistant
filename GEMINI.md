@@ -51,6 +51,32 @@ El cliente solo adjunta tools al request si el tipo de endpoint soporta function
     - Tool `create_github_issue`: Permitir al usuario crear issues directamente desde la voz/chat.
     - Exportación de logs de diagnóstico adjuntos al issue.
 
+### Fase 4.5 - Realtime Voice (En Progreso)
+
+Sesion de voz bidireccional via WebSocket (`/v1/realtime`), compatible con la API de OpenAI Realtime.
+
+| Componente | Estado | Notas |
+|------------|--------|-------|
+| `RealtimeClient.kt` | ✅ | WebSocket, eventos JSON, auth |
+| `RealtimeEvents.kt` | ✅ | SessionConfig, Listener, States |
+| `RealtimeAudioPlayer.kt` | ✅ | AudioTrack streaming PCM16 |
+| `RealtimeConversationManager.kt` | ✅ | Orquestador mic + client + player |
+| Integracion en ChatActivity | ✅ | Boton de sesion Realtime |
+| Server-side VAD | ✅ | Deteccion automatica de habla/silencio |
+| Barge-in (interrupcion) | ✅ | Cancel + clear + stop player |
+| Echo prevention | ✅ | Mic pausado durante SPEAKING |
+| Config STT/TTS en session.update | ⚠️ | Funcional pero depende de defaults del servidor |
+
+**Protocolo completo documentado en**: [`docs/REALTIME_PROTOCOL.md`](docs/REALTIME_PROTOCOL.md)
+
+**Servidor compatible**: oCabra con modelos STT (Whisper) + LLM + TTS configurados. Los modelos se cargan on-demand al iniciar la sesion.
+
+**Pendiente**:
+- Ajuste fino de VAD threshold y silence_duration para conversacion natural
+- Indicador visual de estado (LISTENING/TRANSCRIBING/RESPONDING/SPEAKING) en overlay
+- Soporte para tool calls via Realtime (tools en session.update)
+- AEC (acoustic echo cancellation) como alternativa a pausar mic
+
 ### Fase 5.0 - Multimodalidad y Routing Pro
 
 - **Vision API**: Captura de pantalla y cámara como contexto para el agente.
