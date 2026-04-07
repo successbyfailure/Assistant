@@ -6,6 +6,7 @@ enum class Category(val key: String) {
     AGENT("agent"),
     STT("stt"),
     TTS("tts"),
+    REALTIME("realtime"),
     IMAGE_GEN("image_gen"),
     OCR("ocr")
 }

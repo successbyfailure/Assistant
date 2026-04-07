@@ -321,24 +321,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupPromptSettings() {
-        val realtimeModels = listOf(
-            "gpt-4o-realtime-preview",
-            "gpt-4o-mini-realtime-preview"
-        )
-        val realtimeVoices = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer")
-        val realtimeModelAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, realtimeModels)
-        val realtimeVoiceAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, realtimeVoices)
-        binding.etRealtimeModel.setAdapter(realtimeModelAdapter)
-        binding.acRealtimeVoice.setAdapter(realtimeVoiceAdapter)
-        binding.acRealtimeVoice.setText(
-            settingsManager.realtimeVoice.takeIf { it in realtimeVoices } ?: "alloy",
-            false
-        )
-        binding.etRealtimeModel.setText(
-            settingsManager.realtimeModel.takeIf { it.isNotBlank() } ?: realtimeModels.first(),
-            false
-        )
-
         binding.etSystemPrompt.setText(settingsManager.agentSystemPrompt)
         binding.etUserPromptPrefix.setText(settingsManager.agentUserPromptPrefix)
         binding.swUserPrefixVars.isChecked = settingsManager.agentUserPromptPrefixVarsEnabled
@@ -348,8 +330,6 @@ class MainActivity : AppCompatActivity() {
         binding.etAutoConversationTimeout.setText(settingsManager.autoConversationTimeoutMs.toString())
         binding.tilAutoConversationTimeout.visibility = if (binding.swAutoConversation.isChecked) View.VISIBLE else View.GONE
         binding.swRealtimeEnabled.isChecked = settingsManager.realtimeEnabled
-        binding.tilRealtimeModel.visibility = if (binding.swRealtimeEnabled.isChecked) View.VISIBLE else View.GONE
-        binding.tilRealtimeVoice.visibility = if (binding.swRealtimeEnabled.isChecked) View.VISIBLE else View.GONE
         binding.etVoiceShortcut.setText(settingsManager.voiceShortcutPhrase)
         binding.etVoiceShortcut.isEnabled = binding.swVoiceShortcut.isChecked
 
@@ -379,19 +359,6 @@ class MainActivity : AppCompatActivity() {
         }
         binding.swRealtimeEnabled.setOnCheckedChangeListener { _, isChecked ->
             settingsManager.realtimeEnabled = isChecked
-            binding.tilRealtimeModel.visibility = if (isChecked) View.VISIBLE else View.GONE
-            binding.tilRealtimeVoice.visibility = if (isChecked) View.VISIBLE else View.GONE
-        }
-        binding.acRealtimeVoice.onItemClickListener =
-            AdapterView.OnItemClickListener { _, _, position, _ ->
-                settingsManager.realtimeVoice = realtimeVoices[position]
-            }
-        binding.etRealtimeModel.onItemClickListener =
-            AdapterView.OnItemClickListener { _, _, position, _ ->
-                settingsManager.realtimeModel = realtimeModels[position]
-            }
-        binding.etRealtimeModel.doAfterTextChanged { text ->
-            settingsManager.realtimeModel = text?.toString().orEmpty().trim()
         }
         binding.etVoiceShortcut.doAfterTextChanged { text ->
             settingsManager.voiceShortcutPhrase = text?.toString().orEmpty().trim()
@@ -2347,16 +2314,16 @@ class MainActivity : AppCompatActivity() {
 
         // Show info about the category
         tvInfo.text = when(category) {
-            Category.AGENT -> "Agent: The main brain that processes your queries. (Remote or Local)"
-            Category.STT -> {
-                "STT: Speech-to-Text conversion. 'Android Default' is local/system. Whisper models are remote."
-            }
-            Category.TTS -> "TTS: Text-to-Speech playback. 'Android Default' is system voices."
-            else -> "Configure providers for ${category.name}"
+            Category.AGENT -> "Agent: cerebro principal para texto. (Remote o Local)"
+            Category.STT -> "STT: Speech-to-Text. 'Android Default' = sistema. Whisper = remoto/local."
+            Category.TTS -> "TTS: Text-to-Speech. 'Android Default' = voces del sistema."
+            Category.REALTIME -> "Realtime: conversación bidireccional voz-a-voz via WebSocket. El servidor remoto gestiona STT y TTS. Solo se configura endpoint y modelo LLM."
+            else -> "Configura el proveedor para ${category.name}"
         }
 
         val ttsVoices = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer")
         val ttsFormats = listOf("mp3", "wav", "ogg", "flac")
+
         if (category == Category.TTS) {
             ttsOptionsLayout.visibility = View.VISIBLE
             acTtsVoice.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, ttsVoices))
@@ -2390,11 +2357,14 @@ class MainActivity : AppCompatActivity() {
         val currentPrimaryId = currentConfig.primary?.endpointId
         val localOptions = getLocalModelOptions(category)
         val shouldIncludeLocal = localOptions.isNotEmpty() || currentPrimaryId == "local"
-        if (category == Category.STT || category == Category.TTS) {
-            endpointNames.add(0, "Android Default (System)")
-        }
-        if ((category == Category.STT || category == Category.AGENT) && shouldIncludeLocal) {
-            endpointNames.add(0, "Local (on-device)")
+        // REALTIME only supports remote endpoints — no local or system options
+        if (category != Category.REALTIME) {
+            if (category == Category.STT || category == Category.TTS) {
+                endpointNames.add(0, "Android Default (System)")
+            }
+            if ((category == Category.STT || category == Category.AGENT) && shouldIncludeLocal) {
+                endpointNames.add(0, "Local (on-device)")
+            }
         }
 
         val endpointAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, endpointNames)

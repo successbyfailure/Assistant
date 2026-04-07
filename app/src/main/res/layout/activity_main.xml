@@ -480,35 +480,13 @@
                     android:text="Modo Realtime (WebSocket audio-a-audio)"
                     android:layout_marginTop="12dp" />
 
-                <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/til_realtime_model"
-                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="Realtime model (opcional)">
-
-                    <AutoCompleteTextView
-                        android:id="@+id/et_realtime_model"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="none" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/til_realtime_voice"
-                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="Realtime voice">
-
-                    <AutoCompleteTextView
-                        android:id="@+id/ac_realtime_voice"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="none" />
-                </com.google.android.material.textfield.TextInputLayout>
+                    android:layout_marginTop="4dp"
+                    android:text="Configura el endpoint y modelo en ModelConfig → REALTIME"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:alpha="0.7" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"

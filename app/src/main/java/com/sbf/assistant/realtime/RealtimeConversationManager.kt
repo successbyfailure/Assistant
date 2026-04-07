@@ -33,31 +33,39 @@ class RealtimeConversationManager(
     private var currentState = RealtimeState.IDLE
     private var isActive = false
     private val responseBuffer = StringBuilder()
+    // Tracks whether we are currently receiving audio deltas from the server
+    private var audioReceiving = false
 
     fun isSessionActive(): Boolean = isActive
 
     fun startSession() {
         if (isActive) return
-        val agentConfig = settingsManager.getCategoryConfig(Category.AGENT).primary
-        if (agentConfig == null || agentConfig.endpointId == "local" || agentConfig.endpointId == "system") {
-            onError("Realtime requiere endpoint remoto en categoría AGENT")
-            return
-        }
-        val endpoint = settingsManager.getEndpoint(agentConfig.endpointId)
-        if (endpoint == null) {
-            onError("Endpoint AGENT no encontrado")
-            return
-        }
 
-        val model = settingsManager.realtimeModel.ifBlank { agentConfig.modelName }
+        val realtimeConfig = settingsManager.getCategoryConfig(Category.REALTIME).primary
+        if (realtimeConfig == null) {
+            onError("Configura un endpoint y modelo en la categoría REALTIME (ModelConfig)")
+            return
+        }
+        if (realtimeConfig.endpointId == "local" || realtimeConfig.endpointId == "system") {
+            onError("Realtime requiere un endpoint remoto en la categoría REALTIME")
+            return
+        }
+        val endpoint = settingsManager.getEndpoint(realtimeConfig.endpointId)
+        if (endpoint == null) {
+            onError("Endpoint REALTIME no encontrado")
+            return
+        }
+        val model = realtimeConfig.modelName
         if (model.isBlank()) {
-            onError("Configura realtimeModel o un modelo AGENT")
+            onError("Configura el modelo en la categoría REALTIME")
             return
         }
 
         isActive = true
+        audioReceiving = false
         responseBuffer.clear()
         setState(RealtimeState.CONNECTING)
+
         val sessionConfig = RealtimeSessionConfig(
             voice = settingsManager.realtimeVoice,
             instructions = settingsManager.agentSystemPrompt.trim(),
@@ -104,14 +112,25 @@ class RealtimeConversationManager(
                 }
 
                 override fun onAudioDelta(pcm16Bytes: ByteArray) {
+                    if (!audioReceiving) {
+                        audioReceiving = true
+                        audioPlayer.start()
+                    }
                     setState(RealtimeState.SPEAKING)
-                    audioPlayer.start()
                     audioPlayer.write(pcm16Bytes)
                 }
 
                 override fun onAudioDone() {
+                    audioReceiving = false
                     if (isActive) {
-                        setState(RealtimeState.LISTENING)
+                        // Wait until the AudioTrack actually finishes playing the buffered
+                        // audio before transitioning back to LISTENING. Without this, the
+                        // mic would pick up the tail of the assistant's own voice.
+                        audioPlayer.markEndOfStream {
+                            mainHandler.post {
+                                if (isActive) setState(RealtimeState.LISTENING)
+                            }
+                        }
                     }
                 }
 
@@ -136,15 +155,14 @@ class RealtimeConversationManager(
         audioRecorder.startStreamingRecording(
             onChunk = { chunk -> realtimeClient?.sendAudioChunk(chunk) },
             chunkSizeMs = 100
-        ) { amplitude ->
-            // State callback is enough for now; UI amplitudes can be added when needed.
-        }
+        ) { /* amplitude update not needed here */ }
     }
 
     fun interrupt() {
         if (!isActive) return
         realtimeClient?.cancelResponse()
         realtimeClient?.clearAudio()
+        audioReceiving = false
         audioPlayer.stop()
         setState(RealtimeState.LISTENING)
     }
@@ -152,6 +170,7 @@ class RealtimeConversationManager(
     fun stopSession() {
         if (!isActive) return
         isActive = false
+        audioReceiving = false
         audioRecorder.stopRecording()
         audioRecorder.cleanup()
         audioPlayer.stop()

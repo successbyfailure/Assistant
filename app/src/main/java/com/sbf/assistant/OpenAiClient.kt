@@ -35,6 +35,7 @@ class OpenAiClient(private val endpoint: Endpoint) {
         val baseUrl = normalizedBaseUrl()
         val url = if (baseUrl.endsWith("/")) "${baseUrl}models"
                   else "${baseUrl}/models"
+        Log.d(TAG, "fetchModels → $url (endpointName=${endpoint.name})")
 
         val requestBuilder = Request.Builder()
             .url(url)

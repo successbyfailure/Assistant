@@ -369,19 +369,22 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context), Lif
             }
             return
         }
-        val agentConfig = settingsManager.getCategoryConfig(Category.AGENT).primary
-        if (agentConfig == null || agentConfig.endpointId == "local" || agentConfig.endpointId == "system") {
-            statusText.text = "Realtime requiere endpoint remoto AGENT"
+        val realtimeConfig = settingsManager.getCategoryConfig(Category.REALTIME).primary
+        if (realtimeConfig == null) {
+            statusText.text = "Configura ModelConfig → REALTIME"
             return
         }
-        val endpoint = settingsManager.getEndpoint(agentConfig.endpointId)
+        if (realtimeConfig.endpointId == "local" || realtimeConfig.endpointId == "system") {
+            statusText.text = "Realtime requiere endpoint remoto"
+            return
+        }
+        val endpoint = settingsManager.getEndpoint(realtimeConfig.endpointId)
         if (endpoint == null) {
-            statusText.text = "Endpoint AGENT no encontrado"
+            statusText.text = "Endpoint REALTIME no encontrado"
             return
         }
-        val model = settingsManager.realtimeModel.ifBlank { agentConfig.modelName }
-        if (model.isBlank()) {
-            statusText.text = "Configura realtime model"
+        if (realtimeConfig.modelName.isBlank()) {
+            statusText.text = "Configura el modelo en ModelConfig → REALTIME"
             return
         }
 

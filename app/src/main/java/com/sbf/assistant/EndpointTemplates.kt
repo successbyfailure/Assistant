@@ -52,6 +52,13 @@ object EndpointTemplates {
             type = "openai",
             requiresApiKey = false,
             helpText = "LocalAI installation required"
+        ),
+        EndpointTemplate(
+            name = "oCabra",
+            baseUrl = "https://ocabra.mksmad.org/v1",
+            type = "openai",
+            helpText = "Servidor multi-GPU compatible con OpenAI. Soporta LLM, TTS, STT, imagen y Realtime WebSocket.",
+            helpUrl = "https://ocabra.mksmad.org/docs"
         )
     )
 }

@@ -80,6 +80,7 @@ class CategoryAdapter(
             Category.AGENT -> "Agent"
             Category.STT -> "STT"
             Category.TTS -> "TTS"
+            Category.REALTIME -> "Realtime"
             Category.IMAGE_GEN -> "Image Gen"
             Category.OCR -> "OCR"
         }

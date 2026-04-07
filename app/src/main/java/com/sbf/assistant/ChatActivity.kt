@@ -289,19 +289,22 @@ class ChatActivity : AppCompatActivity() {
             }
             return
         }
-        val agentConfig = settingsManager.getCategoryConfig(Category.AGENT).primary
-        if (agentConfig == null || agentConfig.endpointId == "local" || agentConfig.endpointId == "system") {
-            Toast.makeText(this, "Realtime requiere endpoint remoto en AGENT", Toast.LENGTH_SHORT).show()
+        val realtimeConfig = settingsManager.getCategoryConfig(Category.REALTIME).primary
+        if (realtimeConfig == null) {
+            Toast.makeText(this, "Configura un endpoint en ModelConfig → REALTIME", Toast.LENGTH_SHORT).show()
             return
         }
-        val endpoint = settingsManager.getEndpoint(agentConfig.endpointId)
+        if (realtimeConfig.endpointId == "local" || realtimeConfig.endpointId == "system") {
+            Toast.makeText(this, "Realtime requiere endpoint remoto", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val endpoint = settingsManager.getEndpoint(realtimeConfig.endpointId)
         if (endpoint == null) {
-            Toast.makeText(this, "Endpoint AGENT no encontrado", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Endpoint REALTIME no encontrado", Toast.LENGTH_SHORT).show()
             return
         }
-        val model = settingsManager.realtimeModel.ifBlank { agentConfig.modelName }
-        if (model.isBlank()) {
-            Toast.makeText(this, "Configura realtime model o modelo AGENT", Toast.LENGTH_SHORT).show()
+        if (realtimeConfig.modelName.isBlank()) {
+            Toast.makeText(this, "Configura el modelo en ModelConfig → REALTIME", Toast.LENGTH_SHORT).show()
             return
         }
         suppressTtsForActiveResponse = true
